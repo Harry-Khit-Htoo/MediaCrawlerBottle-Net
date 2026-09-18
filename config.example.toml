@@ -1,0 +1,19 @@
+# Bottle Net Tool - example configuration.
+# Copy this file to config.toml (in the folder you run bottle-net from) and
+# edit as needed. Every setting is optional.
+
+# Where downloaded videos are saved. Sub-folders "tiktok" and "facebook"
+# are created automatically.
+download_directory = "downloads"
+
+# Where crawl results (URL lists) and failed-URL files are written.
+output_directory = "output"
+
+# How many times to retry after a network error or rate limit (0-10).
+max_retries = 3
+
+# Network timeout in seconds (1-600).
+timeout = 30
+
+# Pause between requests in seconds, to be polite to the platforms (0-60).
+request_delay = 1.0

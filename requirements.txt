@@ -1,0 +1,4 @@
+# Runtime dependencies (also declared in pyproject.toml)
+yt-dlp>=2025.1.1
+rich>=13.7
+requests>=2.31

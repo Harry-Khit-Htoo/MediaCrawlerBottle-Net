@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/
+
+# Downloaded media and generated URL lists
+downloads/**
+!downloads/tiktok/
+!downloads/facebook/
+!downloads/**/.gitkeep
+output/*
+!output/.gitkeep
+
+# Local configuration
+config.toml
+.mypy_cache/
+.ruff_cache/
