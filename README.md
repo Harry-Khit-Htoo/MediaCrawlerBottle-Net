@@ -104,6 +104,25 @@ cd bottle-net
 pip install .
 ```
 
+### Install from GitHub
+
+Clone the repository, then install the CLI from the checkout:
+
+```bash
+git clone https://github.com/Harry-Khit-Htoo/MediaCrawlerBottle-Net.git
+cd MediaCrawlerBottle-Net
+python -m pip install .
+```
+
+For a development checkout that uses your working tree directly:
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+After installation, run the command-line interface with `bottle-net`. If the
+executable is not on your `PATH`, use `python -m bottle_net` instead.
+
 ### Install for development (editable, with test tools)
 
 ```bash
