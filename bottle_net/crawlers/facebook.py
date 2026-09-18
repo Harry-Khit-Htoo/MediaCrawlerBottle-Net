@@ -6,19 +6,24 @@ without signing in. This crawler reads those public pages and extracts the
 video links.
 
 Loading *more* videos than that first batch requires Facebook's private,
-session-bound API (or a signed-in session). Bottle Net Tool does not use
-it and does not bypass login walls, so for Pages with many videos the
-result may be incomplete; this is reported to the user.
+session-bound API. Bottle Net Tool does not use it and does not bypass login
+walls, so for Pages with many videos the result may be incomplete; this is
+reported to the user.
+
+Pages that are only visible to signed-in users can be crawled with the
+user's own browser session (``--browser``, see :mod:`bottle_net.browser_cookies`):
+only facebook.com cookies are sent, and only to facebook.com.
 """
 
 from __future__ import annotations
 
 import html as html_lib
+import http.cookiejar
 import logging
 import re
 import time
 from collections.abc import Callable
-from typing import Protocol
+from typing import Any, Protocol
 
 import requests
 
@@ -37,7 +42,7 @@ from bottle_net.utils.urls import FacebookTarget, Platform, facebook_video_url, 
 
 logger = logging.getLogger(__name__)
 
-# Ordinary desktop browser headers. No cookies or tokens are ever sent.
+# Ordinary desktop browser headers. Cookies are sent only with --browser (the user's own session).
 REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -112,17 +117,23 @@ class FacebookCrawler:
         *,
         session: HTTPSession | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        cookies: http.cookiejar.CookieJar | None = None,
+        browser_name: str | None = None,
     ) -> None:
         self.config = config
         self._session = session or requests.Session()
         self._sleep = sleep
+        #: Facebook cookies of the user's own browser session (``--browser``), if any.
+        self._cookies = cookies
+        self._browser_name = browser_name
 
     def fetch(self, url: str, *, on_retry: RetryCallback | None = None) -> str:
         """GET a public Facebook page, mapping HTTP problems to tool errors."""
 
         def attempt() -> str:
             try:
-                response = self._session.get(url, headers=REQUEST_HEADERS, timeout=self.config.timeout)
+                extra: dict[str, Any] = {"cookies": self._cookies} if self._cookies is not None else {}
+                response = self._session.get(url, headers=REQUEST_HEADERS, timeout=self.config.timeout, **extra)
             except requests.Timeout as exc:
                 raise NetworkError(f"Timed out after {self.config.timeout:.0f}s loading {url}") from exc
             except requests.RequestException as exc:
@@ -144,9 +155,16 @@ class FacebookCrawler:
                 )
             body = response.text
             if looks_like_login_wall(response.url or url, body):
+                if self._cookies is not None:
+                    raise LoginRequiredError(
+                        f"Facebook still asks to sign in, using the login from {self._browser_name}.",
+                        hint="The session may have expired (log in to facebook.com in that browser again), or this "
+                             "account is not allowed to see the Page. Bottle Net does not bypass access restrictions.",
+                    )
                 raise LoginRequiredError(
                     "Facebook requires signing in to view this Page.",
-                    hint="Only Pages and profiles that are visible without logging in can be crawled.",
+                    hint="If your Facebook account can see it, log in to facebook.com in your browser and add "
+                         "--browser chrome (or firefox, edge, brave, ...). Bottle Net never asks for your password.",
                 )
             return body
 

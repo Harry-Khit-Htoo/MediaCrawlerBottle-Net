@@ -19,3 +19,14 @@ output/*
 config.toml
 .mypy_cache/
 .ruff_cache/
+
+# Video Publisher secrets and data - never commit these
+.env
+.env.*
+client_secret*.json
+tokens.json
+*.db
+*.db-wal
+*.db-shm
+gui-session.json
+publisher.lock

@@ -5,9 +5,11 @@ information and media URLs. This module builds its options, routes its log
 output into :mod:`logging`, and translates its exceptions into the tool's
 own error types.
 
-Deliberately, no cookies, credentials, browser-cookie import or TLS
-impersonation are configured: only content that is available to an
-anonymous visitor is processed.
+No credentials or TLS impersonation are configured. Cookies are used only
+when the user explicitly passes ``--browser`` for Facebook: then the
+Facebook cookies of their own signed-in browser are added to yt-dlp's
+cookie jar (see :mod:`bottle_net.browser_cookies`). Without it, only content
+available to an anonymous visitor is processed.
 """
 
 from __future__ import annotations
@@ -61,9 +63,9 @@ _ERROR_RULES: list[tuple[re.Pattern[str], type[BottleNetError], str]] = [
     (re.compile(r"\bdrm\b", re.I), BlockedError,
      "The video is DRM-protected. Bottle Net Tool does not bypass DRM."),
     (re.compile(r"private", re.I), PrivateContentError,
-     "Only publicly accessible videos can be downloaded."),
+     "This content is private or not visible to the account being used."),
     (re.compile(r"log ?in|sign ?in|cookies|authenticat|account is required", re.I), LoginRequiredError,
-     "The platform requires signing in to view this content. Bottle Net Tool does not sign in."),
+     "The platform requires signing in to view this content."),
     (re.compile(r"unsupported url", re.I), UnsupportedURLError, "yt-dlp does not support this URL."),
     (re.compile(r"\b(?:404|410)\b|not found|unavailable|removed|deleted|does not exist|no longer|"
                 r"not available|no video formats", re.I), VideoUnavailableError, _UNAVAILABLE),
@@ -128,7 +130,7 @@ def base_options(config: Config) -> dict[str, Any]:
         "nopart": False,
         "overwrites": False,
         "windowsfilenames": True,
-        # Never read credentials: no cookies, no .netrc.
+        # Never read credentials files; browser cookies are added only with --browser.
         "cookiefile": None,
         "usenetrc": False,
     }

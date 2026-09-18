@@ -8,6 +8,7 @@ in the CLI layer.
 
 from __future__ import annotations
 
+import http.cookiejar
 import logging
 import time
 from collections.abc import Callable, Sequence
@@ -130,11 +131,14 @@ class VideoDownloader:
         ydl_factory: YDLFactory = default_factory,
         sleep: Callable[[float], None] = time.sleep,
         ffmpeg: bool | None = None,
+        cookies: http.cookiejar.CookieJar | None = None,
     ) -> None:
         self.config = config
         self._factory = ydl_factory
         self._sleep = sleep
         self._ffmpeg = has_ffmpeg() if ffmpeg is None else ffmpeg
+        #: Cookies of the user's own browser session (``--browser``); None = anonymous.
+        self.cookies = cookies
 
     # ------------------------------------------------------------- extension
 
@@ -170,6 +174,7 @@ class VideoDownloader:
         """Look up a video's public metadata without downloading it."""
         canonical = self.validate(url)
         with self._factory(base_options(self.config) | {"format": format_selector(self._ffmpeg)}) as ydl:
+            self._use_cookies(ydl)
             raw = self._retry(lambda: ydl.extract_info(canonical, download=False), on_retry)
         return self._to_info(raw, canonical)
 
@@ -198,6 +203,7 @@ class VideoDownloader:
             ensure_directory(dest_dir)
             hooks = [progress_hook] if progress_hook else []
             with self._factory(self.options(dest_dir, hooks)) as ydl:
+                self._use_cookies(ydl)
                 raw = self._retry(lambda: ydl.extract_info(canonical, download=False), on_retry)
                 if not isinstance(raw, dict) or raw.get("_type") in ("playlist", "multi_video"):
                     raise ExtractionError("The URL did not resolve to a single video.")
@@ -247,6 +253,11 @@ class VideoDownloader:
         return f"{title}_{info.id}"
 
     # --------------------------------------------------------------- helpers
+
+    def _use_cookies(self, ydl: Any) -> None:
+        """Give yt-dlp the user's browser cookies (only when --browser was used)."""
+        for cookie in self.cookies or ():
+            ydl.cookiejar.set_cookie(cookie)
 
     def _to_info(self, raw: dict[str, Any], url: str) -> VideoInfo:
         video_id = str(raw.get("id") or "").strip()

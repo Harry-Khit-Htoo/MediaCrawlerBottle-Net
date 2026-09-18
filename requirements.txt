@@ -2,3 +2,5 @@
 yt-dlp>=2025.1.1
 rich>=13.7
 requests>=2.31
+keyring>=24
+tzdata>=2024.1; sys_platform == "win32"

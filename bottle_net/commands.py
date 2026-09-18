@@ -12,6 +12,7 @@ progress bars and errors go to **stderr** through :class:`UI`.
 from __future__ import annotations
 
 import argparse
+import http.cookiejar
 import io
 import logging
 import os
@@ -20,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from bottle_net.browser_cookies import BrowserSpec, load_facebook_cookies
 from bottle_net.config import Config
 from bottle_net.crawlers import CrawlResult, FacebookCrawler, TikTokCrawler
 from bottle_net.downloaders import (
@@ -33,7 +35,14 @@ from bottle_net.downloaders import (
     get_downloader,
     run_batch,
 )
-from bottle_net.errors import BottleNetError, InvalidURLError, UnsupportedURLError, URLListError
+from bottle_net.errors import (
+    BottleNetError,
+    InvalidURLError,
+    LoginRequiredError,
+    PrivateContentError,
+    UnsupportedURLError,
+    URLListError,
+)
 from bottle_net.utils.console import UI
 from bottle_net.utils.files import (
     NAME_DIRECTIVE,
@@ -83,6 +92,37 @@ FACEBOOK_NOTE = [
     "",
     "Bottle Net Tool does not use login credentials or private APIs.",
 ]
+FACEBOOK_SIGNED_IN_NOTE = [
+    "Signed in with your browser's Facebook session. Facebook may still",
+    "show only the first batch of videos on a Page, so results may be incomplete.",
+    "",
+    "Bottle Net Tool does not use your password or Facebook's private APIs.",
+]
+
+
+def browser_session(args: argparse.Namespace, ui: UI) -> tuple[http.cookiejar.CookieJar | None, BrowserSpec | None]:
+    """Load the Facebook login of the browser chosen with ``--browser`` (if any).
+
+    Only a status line is shown; cookie values are never printed.
+    """
+    spec: BrowserSpec | None = getattr(args, "browser", None)
+    if spec is None:
+        return None, None
+    cookies = load_facebook_cookies(spec)
+    ui.info(f"Using your Facebook login from {spec.display_name} (read locally, sent only to facebook.com)")
+    return cookies, spec
+
+
+def facebook_login_hint(error: BottleNetError, spec: BrowserSpec | None) -> None:
+    """Explain what to do when Facebook requires a login (or the account cannot see the video)."""
+    if not isinstance(error, (LoginRequiredError, PrivateContentError)):
+        return
+    if spec is None:
+        error.hint = ("If your Facebook account can see this video, log in to facebook.com in your browser and add "
+                      "--browser chrome (or firefox, edge, brave, ...). Bottle Net never asks for your password.")
+    else:
+        error.hint = (f"The Facebook account signed in to {spec.display_name} cannot see this video, or the login "
+                      "has expired. Bottle Net does not bypass private content or access restrictions.")
 
 
 def _retry_line(attempt: int, error: BottleNetError, delay: float) -> str:
@@ -131,7 +171,6 @@ def crawl(args: argparse.Namespace, config: Config, ui: UI) -> int:
     else:
         page = parse_facebook_target(args.target)
         name, target = page.name, page.url
-        crawler = FacebookCrawler(config)
 
     # Capture the real stdout now, before any live display is started.
     data_stream = sys.stdout
@@ -141,6 +180,9 @@ def crawl(args: argparse.Namespace, config: Config, ui: UI) -> int:
 
     ui.header(f"{platform.display_name} Crawler")
     ui.field("Target", target)
+    cookies, spec = browser_session(args, ui) if platform is Platform.FACEBOOK else (None, None)
+    if platform is Platform.FACEBOOK:
+        crawler = FacebookCrawler(config, cookies=cookies, browser_name=spec.display_name if spec else None)
     ui.blank()
     ui.info("Starting crawler")
     ui.info("Discovering public videos")
@@ -196,7 +238,7 @@ def crawl(args: argparse.Namespace, config: Config, ui: UI) -> int:
         ui.note(note)
     if platform is Platform.FACEBOOK:
         ui.blank()
-        ui.notice("Note:", FACEBOOK_NOTE)
+        ui.notice("Note:", FACEBOOK_SIGNED_IN_NOTE if spec else FACEBOOK_NOTE)
 
     if not result.urls:
         ui.blank()
@@ -253,12 +295,13 @@ def download(args: argparse.Namespace, config: Config, ui: UI) -> int:
     if platform is None:
         raise unknown_url_error(args.url)
 
-    downloader = get_downloader(platform, config)
-    # Validate before printing anything else so bad input fails fast.
-    downloader.validate(args.url)
+    # Validate before anything else so bad input fails fast.
+    get_downloader(platform, config).validate(args.url)
     dest_dir: Path = args.dir or config.platform_download_dir(platform)
 
     ui.header(f"{platform.display_name} Downloader")
+    cookies, spec = browser_session(args, ui) if platform is Platform.FACEBOOK else (None, None)
+    downloader = get_downloader(platform, config, cookies=cookies)
 
     progress = DownloadProgress(ui.console)
 
@@ -294,6 +337,8 @@ def download(args: argparse.Namespace, config: Config, ui: UI) -> int:
 
     if result.status is DownloadStatus.FAILED:
         assert result.error is not None
+        if platform is Platform.FACEBOOK:
+            facebook_login_hint(result.error, spec)
         ui.failure(result.error)
         return EXIT_FAILURE
     assert result.path is not None
@@ -360,9 +405,11 @@ def download_list(args: argparse.Namespace, config: Config, ui: UI) -> int:
     name = args.name or (recorded_name if output_dir is None else None) or default_batch_name(url_list, platform)
     failed_file: Path = args.failed_file or config.output_directory / f"failed_{platform.value if platform else 'downloads'}.txt"
 
+    ui.header(f"{platform.display_name} Batch Downloader" if platform else "Batch Downloader")
+    cookies, spec = browser_session(args, ui) if platform is Platform.FACEBOOK else (None, None)
     downloader: BatchDownloader
     if platform is not None:
-        downloader = get_downloader(platform, config)
+        downloader = get_downloader(platform, config, cookies=cookies)
         dest_dir: Path = output_dir or config.platform_download_dir(platform) / name
         save_to = display_path(dest_dir)
     else:
@@ -370,7 +417,6 @@ def download_list(args: argparse.Namespace, config: Config, ui: UI) -> int:
         dest_dir = output_dir or config.download_directory
         save_to = display_path(dest_dir) if output_dir else display_path(dest_dir / "<platform>" / name)
 
-    ui.header(f"{platform.display_name} Batch Downloader" if platform else "Batch Downloader")
     ui.field("URL list", url_list.source)
     ui.field("Total", str(len(url_list.urls)))
     if url_list.duplicates:
@@ -418,8 +464,19 @@ def download_list(args: argparse.Namespace, config: Config, ui: UI) -> int:
     # Retrying must put videos back in the same folder(s): name the exact
     # folder, or for the universal default layout, the batch name.
     retry_dir: Path | None = dest_dir if platform is not None else output_dir
-    retry = RetryInfo(failed_file, platform, retry_dir, None if retry_dir else name)
-    return _report_batch(ui, summary, retry)
+    retry = RetryInfo(failed_file, platform, retry_dir, None if retry_dir else name,
+                      extra=f' --browser "{spec.browser}{":" + spec.profile if spec.profile else ""}"' if spec else "")
+    if platform is Platform.FACEBOOK and any(isinstance(f.error, (LoginRequiredError, PrivateContentError))
+                                             for f in summary.results if f.error):
+        hint_error = LoginRequiredError("")
+        facebook_login_hint(hint_error, spec)
+        summary_hint = hint_error.hint
+    else:
+        summary_hint = None
+    code = _report_batch(ui, summary, retry)
+    if summary_hint:
+        ui.note(summary_hint)
+    return code
 
 
 @dataclass(frozen=True)
@@ -430,11 +487,13 @@ class RetryInfo:
     platform: Platform | None
     destination: Path | None
     name: str | None
+    #: Extra options to repeat on retry (e.g. ``--browser chrome``).
+    extra: str = ""
 
     def command(self, *, multiline: bool = False) -> str:
         return retry_command(
             self.failed_file, self.platform, destination=self.destination, name=self.name, multiline=multiline
-        )
+        ) + self.extra
 
 
 def _report_batch(ui: UI, summary: BatchSummary, retry: RetryInfo) -> int:

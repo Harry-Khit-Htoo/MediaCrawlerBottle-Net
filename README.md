@@ -25,9 +25,11 @@ Bottle Net Tool (`bottle-net`) can:
 It works on Windows, macOS and Linux. Video extraction uses the open-source
 [yt-dlp](https://github.com/yt-dlp/yt-dlp) project.
 
-> Bottle Net Tool only works with content that anyone can see **without
-> signing in**. It never logs in, never uses cookies or passwords, and does
-> not get around private accounts, login walls, CAPTCHAs, DRM or rate limits.
+> Bottle Net Tool works with content that anyone can see **without signing
+> in**. For Facebook content that needs a login, you can optionally use the
+> session of a browser you are already signed in to (`--browser`). It never
+> asks for or stores passwords, and it does not get around private accounts,
+> access restrictions, CAPTCHAs, DRM or rate limits.
 
 ---
 
@@ -55,7 +57,59 @@ bottle-net facebook crawl "PAGE_URL"
 bottle-net facebook crawl "PAGE_URL" -o links.txt
 bottle-net facebook download "VIDEO_URL"
 bottle-net facebook download-list links.txt
+
+# Content that requires you to be logged in: use your browser's session
+bottle-net facebook crawl "PAGE_URL" --browser chrome
 ```
+
+See [Facebook authentication](#facebook-authentication).
+
+## Facebook authentication
+
+Some Facebook pages/videos require you to be logged in.
+
+Bottle Net Tool does **NOT** ask for or store your Facebook password.
+
+Use an existing browser session:
+
+```bash
+bottle-net facebook crawl "<PAGE_URL>" --browser chrome
+bottle-net facebook download "<VIDEO_URL>" --browser chrome
+bottle-net facebook download-list links.txt --browser chrome
+```
+
+Supported browsers: `chrome`, `firefox`, `edge`, `brave`, `chromium`,
+`opera`, `vivaldi`, `safari`. For another browser profile, use
+`BROWSER:PROFILE`, for example `--browser "chrome:Profile 1"` or
+`--browser "firefox:C:\path\to\profile"`.
+
+Example:
+
+```bash
+bottle-net facebook crawl "https://www.facebook.com/NASA" --browser chrome
+```
+
+The selected browser must already be logged in to Facebook.
+
+If the cookies cannot be read, close the browser completely and try again
+(Chrome and Edge lock their cookie file while they run). Newer Chrome
+versions on Windows protect their cookies in a way other programs cannot
+always read; if that happens, log in to Facebook in Firefox and use
+`--browser firefox`.
+
+Security:
+
+- Passwords are never requested.
+- Cookies are read locally from the selected browser, and only the
+  `facebook.com` cookies are used.
+- Cookies/tokens are never printed, logged, saved or uploaded; they are sent
+  only to facebook.com, exactly as your browser would send them.
+- Authentication does not bypass private content or access restrictions:
+  Bottle Net sees only what your own Facebook account can see.
+
+Automated access while logged in is subject to Meta's terms. Keep the
+default request delay, and use this only for content you are allowed to
+download.
 
 ## Universal downloader
 
@@ -63,6 +117,16 @@ bottle-net facebook download-list links.txt
 bottle-net download "VIDEO_URL"       # TikTok or Facebook, detected automatically
 bottle-net download-list links.txt    # a list that mixes TikTok and Facebook links
 ```
+
+## Video Publisher (GUI)
+
+```bash
+bottle-net gui                        # upload and schedule videos to YouTube and Facebook Pages
+```
+
+A desktop-style app in your browser for publishing your own videos with the
+official YouTube Data API and Meta Graph API. See
+[Video Publisher](#video-publisher) below.
 
 > **Tip:** always put URLs in quotes. Characters such as `?` and `&` have a
 > special meaning in most shells.
@@ -72,6 +136,8 @@ bottle-net download-list links.txt    # a list that mixes TikTok and Facebook li
 ## Contents
 
 - [Installation](#installation)
+- [Facebook authentication](#facebook-authentication)
+- [Video Publisher](#video-publisher)
 - [A first session](#a-first-session)
 - [Saving links: files, redirection and pipelines](#saving-links-files-redirection-and-pipelines)
 - [Batch downloads and retrying failures](#batch-downloads-and-retrying-failures)
@@ -176,6 +242,110 @@ contact TikTok or Facebook, and it does not create folders.
 > If `bottle-net` is "not recognized" or "command not found", Python's
 > scripts folder is not on your `PATH`. Use `python -m bottle_net` instead,
 > for example `python -m bottle_net -h`.
+
+## Video Publisher
+
+**Bottle Net - Video Publisher** uploads and schedules videos to **YouTube**
+and **Facebook Pages**. It runs on your computer and opens in your web browser:
+
+```bash
+bottle-net gui
+```
+
+Keep the terminal window open while uploads are scheduled; press Ctrl+C to
+stop. Pages: **Dashboard**, **Videos**, **Scheduler** (calendar),
+**Upload Queue**, **History**, **Accounts** and **Settings**.
+
+### What it does
+
+- Add videos by drag & drop, from the file picker, from your Bottle Net
+  `downloads` folder, or with **Download & Schedule** (uses the normal Bottle
+  Net downloader).
+- Title, description, tags (with `{filename}`, `{date}`, `{time}` templates),
+  thumbnail, YouTube privacy and "made for kids".
+- Publish now, or schedule several videos per day (default timezone
+  `Asia/Bangkok`, changeable in Settings). Drag uploads between days in the
+  calendar to move them.
+- One video can go to YouTube and Facebook at once. Each platform is a
+  separate upload: if YouTube succeeds and Facebook fails, YouTube stays
+  published and only Facebook needs a **Retry**.
+- Temporary errors (timeouts, connection resets, HTTP 429, server errors) are
+  retried automatically: attempt 1 at the scheduled time, then +1, +5 and
+  +15 minutes (configurable). Permanent errors (missing permissions,
+  expired connection, invalid video or details) are not retried and are
+  explained in plain language.
+- Duplicate protection: a video that is already published (or scheduled) on a
+  platform is not published there again unless you choose **Publish Again**.
+- Schedules are stored on disk and survive restarts. Interrupted uploads
+  resume. If Bottle Net was not running at a scheduled time, the upload is
+  marked **Missed** and you choose Publish now, reschedule, or cancel (you can
+  change this in Settings).
+- Optional "Upload now and let YouTube/Facebook publish at this time" uses the
+  platforms' own scheduling, so the video goes live even if Bottle Net is
+  closed.
+
+### Sign-in and security
+
+- Bottle Net **never asks for your Google or Facebook password**. Clicking
+  **Connect YouTube** / **Connect Facebook** opens Google's or Meta's own
+  sign-in page (OAuth 2.0); Bottle Net only receives an access token.
+- Tokens are stored in your operating system's credential store (Windows
+  Credential Manager, macOS Keychain, Linux Secret Service), never in the job
+  database, the browser, or the logs.
+- The GUI listens on `127.0.0.1` only and is opened with a private link;
+  other programs or websites cannot use it.
+- Facebook publishing is for **Pages** you manage (not personal profiles).
+
+### One-time setup: API credentials
+
+Uploading uses your own (free) developer apps at Google and Meta. Put the
+values in environment variables or in a `.env` file in the Bottle Net data
+folder (Settings shows where; a template is in
+[`publisher.env.example`](publisher.env.example)). Never commit this file.
+
+**YouTube (Google Cloud Console)**
+
+1. Create a project and enable the **YouTube Data API v3**.
+2. Configure the OAuth consent screen and add yourself as a test user.
+3. Create an OAuth client of type **Desktop app**.
+4. Set `BOTTLE_NET_YOUTUBE_CLIENT_ID` and `BOTTLE_NET_YOUTUBE_CLIENT_SECRET`
+   (or `BOTTLE_NET_YOUTUBE_CLIENT_SECRETS_FILE` pointing at the downloaded
+   JSON file).
+
+**Facebook (Meta for Developers)**
+
+1. Create an app with **Facebook Login**.
+2. Add `http://localhost:8765/oauth/facebook/callback` to **Valid OAuth
+   Redirect URIs** (use your `--port` if you change it).
+3. Request the permissions `pages_show_list`, `pages_read_engagement`,
+   `pages_manage_posts` and `publish_video` (publishing for other people's
+   Pages requires Meta's App Review).
+4. Set `BOTTLE_NET_FACEBOOK_APP_ID` and `BOTTLE_NET_FACEBOOK_APP_SECRET`.
+   Optionally pin a Graph API version with
+   `BOTTLE_NET_FACEBOOK_GRAPH_VERSION` (for example `v23.0`).
+
+Quotas and rules of both platforms apply (for example, the YouTube Data API
+has a daily quota, and custom YouTube thumbnails need a verified channel).
+
+### Only publish what you may publish
+
+Downloaded videos usually belong to someone else. Publish only videos you
+own or have permission to publish; Bottle Net asks you to confirm this for
+downloaded videos.
+
+### Optional terminal commands
+
+```bash
+bottle-net gui --port 8766 --no-browser   # another port; print the private link instead
+bottle-net publisher jobs                 # list uploads
+bottle-net publisher run                  # run the scheduler without the GUI
+```
+
+The publisher's data (database, imported videos, thumbnails, logs) lives in
+`%LOCALAPPDATA%\bottle-net` on Windows, `~/Library/Application Support/bottle-net`
+on macOS and `~/.local/share/bottle-net` on Linux (`BOTTLE_NET_DATA_DIR`
+overrides it). Technical error details go to `logs/publisher.log` there, with
+tokens removed.
 
 ## A first session
 
@@ -412,7 +582,8 @@ Start with `bottle-net doctor`. It finds most setup problems.
 | `[!] URL is invalid.` | The text is not a web address, or it is the wrong kind of link (for example a profile link passed to `download`). The message explains which command to use. |
 | `[!] Unsupported platform.` | Only TikTok and Facebook are supported. |
 | `[!] Video unavailable.` | The video was deleted, made private, or is restricted in your region. |
-| `[!] Content is private.` / `[!] Login is required.` | The content is not public. Bottle Net Tool does not sign in, so it cannot download it. |
+| `[!] Content is private.` / `[!] Login is required.` | The content is not public. For Facebook content your own account can see, log in to facebook.com in your browser and add `--browser chrome` (or firefox, edge, ...). Content your account cannot see stays inaccessible. |
+| `[!] Could not use your browser's Facebook login.` | The browser is not logged in to Facebook, is still running (close it), or its cookies cannot be read. See [Facebook authentication](#facebook-authentication). |
 | `[!] Rate limit detected.` | The platform wants you to slow down. Wait a while (for example 15–60 minutes), or raise `request_delay` in `config.toml`. |
 | `[!] Network timeout.` / `[!] Network error.` | Check your internet connection. These errors are retried automatically. |
 | `[!] Access blocked by the platform.` | The platform asked for a CAPTCHA or blocked automated access from your network. Bottle Net Tool does not bypass this; try again later. |
@@ -441,7 +612,10 @@ tokens. Bottle Net Tool does not use any, and anything that looks like one
 - Respect the platforms' terms of service. TikTok and Facebook restrict
   automated access and downloading; you are responsible for how you use the
   tool.
-- Bottle Net Tool only processes publicly accessible content. It does **not**
+- With `--browser`, Bottle Net uses your own Facebook session: only content
+  your account is allowed to see, never other people's private content.
+- Bottle Net Tool only processes publicly accessible content (or, with
+  `--browser`, content visible to your own account). It does **not**
   access private accounts, bypass logins, solve or bypass CAPTCHAs, remove
   DRM, or circumvent any other access control. When a platform blocks access,
   the tool stops and tells you why.
@@ -475,6 +649,7 @@ bottle-net doctor
 | `-d DIR`, `--output-dir DIR` | `download`, `download-list` | Save videos in `DIR` (`--dir` also works) |
 | `--name NAME` | `download-list` | Sub-folder name for the batch |
 | `--failed-file FILE` | `download-list` | Where to write failed URLs |
+| `--browser BROWSER` | `facebook crawl`, `download`, `download-list` | Use the Facebook login of a browser you are signed in to |
 | `--config FILE` | all | Use a specific configuration file |
 | `--debug` | all | Show detailed diagnostic output |
 | `--no-color` | all | Disable colors (the `NO_COLOR` environment variable also works) |
@@ -528,7 +703,7 @@ data goes to stdout.
 
 ```bash
 pip install -e ".[dev]"
-pytest                       # the full test suite
+pytest                       # the full test suite (GUI view tests need Node.js)
 ruff check bottle_net tests  # lint
 mypy bottle_net              # type check
 ```

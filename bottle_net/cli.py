@@ -23,6 +23,7 @@ from typing import Any, NoReturn
 from rich.console import Console
 
 from bottle_net import APP_NAME, __author__, __version__
+from bottle_net.browser_cookies import SUPPORTED_BROWSERS, BrowserSpec, parse_browser
 from bottle_net.config import load_config
 from bottle_net.errors import BottleNetError
 from bottle_net.utils.console import UI
@@ -48,6 +49,7 @@ Usage:
   {PROG} download <URL> [OPTIONS]
   {PROG} download-list <FILE | -> [OPTIONS]
   {PROG} doctor
+  {PROG} gui
 
 Platforms:
   tiktok         TikTok tools
@@ -58,6 +60,8 @@ Commands:
   download       Download one video
   download-list  Download every video in a URL list (a file, or - for stdin)
   doctor         Check that Python, yt-dlp, FFmpeg and folders are ready
+  gui            Open the Video Publisher: upload and schedule videos to
+                 YouTube and Facebook Pages (official APIs, OAuth sign-in)
 
 Examples:
   {PROG} doctor
@@ -193,6 +197,55 @@ def _global_options(parser: argparse.ArgumentParser, *, suppress: bool) -> None:
         parser.add_argument("-q", "--quiet", action="store_true", default=False, help=argparse.SUPPRESS)
 
 
+FACEBOOK_AUTH_HELP = f"""\
+Facebook authentication
+-----------------------
+Some Facebook pages/videos require you to be logged in.
+
+Bottle Net Tool does NOT ask for or store your Facebook password.
+
+Use an existing browser session:
+
+  {PROG} facebook crawl "<PAGE_URL>" --browser chrome
+  {PROG} facebook download "<VIDEO_URL>" --browser chrome
+  {PROG} facebook download-list links.txt --browser chrome
+
+Supported browsers:
+{chr(10).join("  " + b for b in SUPPORTED_BROWSERS)}
+
+For another browser profile use BROWSER:PROFILE, e.g. --browser "chrome:Profile 1".
+
+Example:
+  {PROG} facebook crawl "https://www.facebook.com/NASA" --browser chrome
+
+The selected browser must already be logged in to Facebook. If its cookies
+cannot be read, close the browser completely and try again (Chrome and Edge
+lock their cookie file while running); Firefox usually works best.
+
+Security:
+  - Passwords are never requested.
+  - Cookies are read locally from the selected browser (only facebook.com cookies).
+  - Cookies/tokens are never printed, saved or uploaded; they are sent only to facebook.com.
+  - Authentication does not bypass private content or access restrictions.
+"""
+
+BROWSER_OPTION_HELP = ("Use the Facebook login of this browser: " + ", ".join(SUPPORTED_BROWSERS)
+                       + " (BROWSER:PROFILE for another profile). Your password is never asked for")
+BROWSER_EPILOG = ("\n\nLogged-in content: add --browser chrome (or firefox, edge, ...) to use your browser's\n"
+                  f"Facebook session. See '{PROG} facebook -h' for details and security notes.")
+
+
+def _browser(value: str) -> BrowserSpec:
+    try:
+        return parse_browser(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
+
+
+def _add_browser(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--browser", metavar="BROWSER", type=_browser, help=BROWSER_OPTION_HELP)
+
+
 def _positive_int(value: str) -> int:
     try:
         number = int(value)
@@ -252,6 +305,8 @@ def _add_crawl(sub: Any, platform: Platform) -> None:
         "output contains only URLs.\n\n"
         f"Then download the videos with:\n  {PROG} {value} download-list videos.txt"
     )
+    if platform is Platform.FACEBOOK:
+        epilog += BROWSER_EPILOG
     parser = sub.add_parser(
         "crawl",
         help=f"Find public video URLs on a {name} {_ACCOUNT_WORD[platform]}",
@@ -267,6 +322,8 @@ def _add_crawl(sub: Any, platform: Platform) -> None:
     parser.add_argument("--format", metavar="FORMAT", choices=list(OUTPUT_FORMATS), default=DEFAULT_FORMAT,
                         help=f"Output format: {formats} (default: {DEFAULT_FORMAT})")
     parser.add_argument("--limit", metavar="N", type=_positive_int, help="Stop after finding N videos")
+    if platform is Platform.FACEBOOK:
+        _add_browser(parser)
     _add_help(parser)
     _global_options(parser, suppress=True)
     parser.set_defaults(action="crawl", platform=platform)
@@ -286,7 +343,9 @@ def _add_download(sub: Any, platform: Platform | None) -> None:
         default_dir = "downloads/<platform>/"
     else:
         name, prog = platform.display_name, f"{PROG} {platform.value} download"
-        description = f"Download one publicly accessible {name} video."
+        description = f"Download one publicly accessible {name} video." if platform is Platform.TIKTOK else (
+            "Download one Facebook video: public videos, or videos your own account can\n"
+            "see when you add --browser.")
         examples = [f'{PROG} {platform.value} download "{u}"' for u in (
             ["https://www.tiktok.com/@username/video/1234567890", "https://vm.tiktok.com/ZMabcdef/"]
             if platform is Platform.TIKTOK
@@ -297,13 +356,15 @@ def _add_download(sub: Any, platform: Platform | None) -> None:
         "download",
         help=f"Download one {name} video",
         description=description + "\n\nAlways put URLs in quotes: they often contain '?' or '&'.",
-        epilog=_examples(examples),
+        epilog=_examples(examples) + (BROWSER_EPILOG if platform is Platform.FACEBOOK else ""),
         prog=prog,
         usage="%(prog)s <URL> [OPTIONS]",
     )
     parser.add_argument("url", metavar="URL", help=f"{name} video URL")
     parser.add_argument("-d", "--output-dir", "--dir", dest="dir", metavar="DIR", type=Path,
                         help=f"Save the video in DIR (default: {default_dir})")
+    if platform is Platform.FACEBOOK:
+        _add_browser(parser)
     _add_quiet(parser)
     _add_help(parser)
     _global_options(parser, suppress=True)
@@ -340,7 +401,7 @@ def _add_download_list(sub: Any, platform: Platform | None) -> None:
         ) + (
             "\n\n<name> is taken from the list's filename (output/tiktok_example_links.txt\n"
             "-> example); for standard input, from the TikTok account, or 'stdin'."
-        ),
+        ) + (BROWSER_EPILOG if platform is Platform.FACEBOOK else ""),
         prog=prog,
         usage="%(prog)s <FILE | -> [OPTIONS]",
     )
@@ -351,6 +412,8 @@ def _add_download_list(sub: Any, platform: Platform | None) -> None:
                         help="Sub-folder name for this batch (default: from the list's filename)")
     parser.add_argument("--failed-file", metavar="FILE", type=Path,
                         help=f"Where to record failed URLs (default: output/failed_{failed}.txt)")
+    if platform is Platform.FACEBOOK:
+        _add_browser(parser)
     _add_quiet(parser)
     _add_help(parser)
     _global_options(parser, suppress=True)
@@ -359,7 +422,7 @@ def _add_download_list(sub: Any, platform: Platform | None) -> None:
 
 def _platform_help(platform: Platform) -> str:
     examples = "\n".join(f"  {PROG} {platform.value} {e}" for e in _PLATFORM_EXAMPLES[platform])
-    return PLATFORM_HELP.format(
+    text = PLATFORM_HELP.format(
         app=APP_NAME,
         name=platform.display_name,
         prog=PROG,
@@ -367,6 +430,7 @@ def _platform_help(platform: Platform) -> str:
         account_word=_ACCOUNT_WORD[platform],
         examples=examples,
     )
+    return text + "\n" + FACEBOOK_AUTH_HELP if platform is Platform.FACEBOOK else text
 
 
 def build_parser() -> Parser:
@@ -394,7 +458,50 @@ def build_parser() -> Parser:
     _add_download(platforms, None)
     _add_download_list(platforms, None)
     _add_doctor(platforms)
+    _add_publisher(platforms)
     return parser
+
+
+def _add_publisher(sub: Any) -> None:
+    """``bottle-net gui`` and ``bottle-net publisher ...`` (Video Publisher)."""
+    data_help = "Publisher data folder (default: your user data folder)"
+    gui = sub.add_parser(
+        "gui",
+        help="Open the Video Publisher (upload and schedule to YouTube and Facebook)",
+        description=(
+            "Open Bottle Net - Video Publisher in your web browser. It uploads and\n"
+            "schedules videos to YouTube and Facebook Pages using their official APIs.\n\n"
+            "Accounts are connected with Google's and Meta's own sign-in pages (OAuth);\n"
+            "Bottle Net never asks for your password. The GUI runs only on this computer\n"
+            "(127.0.0.1). Keep the command running for scheduled uploads."
+        ),
+        epilog=_examples([f"{PROG} gui", f"{PROG} gui --port 8766 --no-browser"]),
+        prog=f"{PROG} gui",
+        usage="%(prog)s [OPTIONS]",
+    )
+    gui.add_argument("--port", type=_positive_int, default=8765, metavar="PORT", help="Local port (default: 8765)")
+    gui.add_argument("--no-browser", action="store_true", help="Do not open the browser automatically")
+    gui.add_argument("--data-dir", metavar="DIR", help=data_help)
+    _add_help(gui)
+    _global_options(gui, suppress=True)
+    gui.set_defaults(action="gui", platform=None)
+
+    publisher = sub.add_parser(
+        "publisher", help="Video Publisher tools for the terminal (optional)", prog=f"{PROG} publisher",
+        description="Optional terminal commands for the Video Publisher. Most people use 'bottle-net gui'.",
+        usage="%(prog)s <command> [OPTIONS]",
+    )
+    _add_help(publisher)
+    publisher.set_defaults(action=None, platform=None)
+    commands = publisher.add_subparsers(dest="publisher_command", metavar="<command>", parser_class=Parser)
+    for name, action, text in (("jobs", "publisher-jobs", "List uploads and their status"),
+                               ("run", "publisher-run", "Run the upload scheduler without the GUI")):
+        command = commands.add_parser(name, help=text, description=text + ".", prog=f"{PROG} publisher {name}",
+                                      usage="%(prog)s [OPTIONS]")
+        command.add_argument("--data-dir", metavar="DIR", help=data_help)
+        _add_help(command)
+        _global_options(command, suppress=True)
+        command.set_defaults(action=action, platform=None)
 
 
 def _add_doctor(sub: Any) -> None:
@@ -485,6 +592,13 @@ def _run(argv: Sequence[str] | None) -> int:
         from bottle_net.doctor import run_doctor
 
         return run_doctor(Console(highlight=False, no_color=no_color), config_path=getattr(args, "config", None))
+
+    if action in ("gui", "publisher-jobs", "publisher-run"):
+        from bottle_net.publisher import commands as publisher_commands
+
+        handler = {"gui": publisher_commands.run_gui, "publisher-jobs": publisher_commands.list_jobs,
+                   "publisher-run": publisher_commands.run_scheduler}[action]
+        return handler(args, ui)
 
     # Imported lazily so that `-h` stays fast.
     from bottle_net import commands

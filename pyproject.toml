@@ -34,6 +34,9 @@ dependencies = [
     "yt-dlp>=2025.1.1",
     "rich>=13.7",
     "requests>=2.31",
+    # Video Publisher: OAuth tokens in the OS credential store; timezone data on Windows.
+    "keyring>=24",
+    "tzdata>=2024.1; sys_platform == \"win32\"",
 ]
 
 [project.optional-dependencies]
@@ -47,6 +50,9 @@ version = { attr = "bottle_net.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["bottle_net*"]
+
+[tool.setuptools.package-data]
+"bottle_net.publisher" = ["web/*.html", "web/*.css", "web/js/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

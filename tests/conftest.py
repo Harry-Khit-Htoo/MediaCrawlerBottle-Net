@@ -39,8 +39,12 @@ class FakeYDL:
     """Implements the parts of ``yt_dlp.YoutubeDL`` Bottle Net uses."""
 
     def __init__(self, factory: FakeYDLFactory, params: dict[str, Any]) -> None:
+        import http.cookiejar
+
         self.factory = factory
         self.params = params
+        self.cookiejar = http.cookiejar.CookieJar()
+        factory.clients.append(self)
 
     def __enter__(self) -> FakeYDL:
         return self
@@ -99,6 +103,7 @@ class FakeYDLFactory:
         self.extract_calls: list[str] = []
         self.download_calls: list[str] = []
         self.options: list[dict[str, Any]] = []
+        self.clients: list[FakeYDL] = []
 
     def add(self, url: str, video: FakeVideo) -> None:
         """Register *video* under its canonical *url*."""
@@ -167,3 +172,73 @@ def config(tmp_path: Path) -> Config:
         timeout=5,
         request_delay=0,
     )
+
+
+# ------------------------------------------------------------ publisher fixtures
+
+
+@dataclass
+class PublisherEnv:
+    """A publisher app wired to fake Google/Meta servers and a fake clock."""
+
+    app: Any
+    http: Any
+    youtube: Any
+    facebook: Any
+    clock: Any
+
+    def connect_youtube(self) -> None:
+        from urllib.parse import parse_qs, urlsplit
+
+        from bottle_net.publisher.models import PublishPlatform
+
+        url = self.app.connect(PublishPlatform.YOUTUBE)
+        state = parse_qs(urlsplit(url).query)["state"][0]
+        outcome = self.app.oauth_callback(PublishPlatform.YOUTUBE, {"code": "google-code", "state": state})
+        assert outcome.ok, outcome.message
+
+    def connect_facebook(self, page_id: str = "111") -> None:
+        from urllib.parse import parse_qs, urlsplit
+
+        from bottle_net.publisher.models import PublishPlatform
+
+        url = self.app.connect(PublishPlatform.FACEBOOK)
+        state = parse_qs(urlsplit(url).query)["state"][0]
+        outcome = self.app.oauth_callback(PublishPlatform.FACEBOOK, {"code": "fb-code", "state": state})
+        assert outcome.ok, outcome.message
+        if self.app.facebook_auth.pending_pages():
+            self.app.select_facebook_page(page_id)
+
+    def add_video(self, name: str = "Morning.mp4", content: bytes = b"\x00\x00\x00\x18ftypmp42" + b"v" * 2500,
+                  *, source: str = "import") -> Any:
+        folder = self.app.paths.root / "incoming"
+        folder.mkdir(exist_ok=True)
+        path = folder / name
+        path.write_bytes(content)
+        return self.app.library.import_path(path, source=source)
+
+    def tick(self) -> list[int]:
+        return self.app.scheduler.tick()
+
+
+@pytest.fixture
+def pub(tmp_path: Path) -> Any:
+    from publisher_fakes import FakeClock, FakeFacebook, FakeHTTP, FakeYouTube, fake_credentials
+
+    from bottle_net.publisher.app import PublisherApp
+    from bottle_net.publisher.models import PublishPlatform
+    from bottle_net.publisher.paths import PublisherPaths
+    from bottle_net.publisher.secrets import MemoryTokenStore
+
+    http = FakeHTTP()
+    youtube = FakeYouTube(http)
+    facebook = FakeFacebook(http)
+    clock = FakeClock()
+    holder: dict[str, Any] = {}
+    app = PublisherApp(PublisherPaths(tmp_path / "data"), token_store=MemoryTokenStore(),
+                       credentials=fake_credentials(), http=http, clock=clock,
+                       submit=lambda pj_id: holder["app"].worker.process(pj_id))
+    holder["app"] = app
+    app.uploaders[PublishPlatform.YOUTUBE].chunk_size = 1024  # several chunks even for tiny test videos
+    yield PublisherEnv(app, http, youtube, facebook, clock)
+    app.close()

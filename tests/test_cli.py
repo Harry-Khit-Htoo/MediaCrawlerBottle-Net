@@ -299,7 +299,7 @@ class TestCrawlOutput:
             f"{page}/reels": FakeResponse('<a href="/reel/22345678901/">r</a>'),
         })
         monkeypatch.setattr(commands, "FacebookCrawler",
-                            lambda config: FacebookCrawler(config, session=session, sleep=lambda _: None))
+                            lambda config, **kw: FacebookCrawler(config, session=session, sleep=lambda _: None, **kw))
         code, out, err = run(capsys, "facebook", "crawl", page, "-o", "facebook-links.txt")
         assert code == EXIT_OK and out == ""
         assert (workdir / "facebook-links.txt").read_text(encoding="utf-8").splitlines() == [
@@ -312,7 +312,7 @@ class TestCrawlOutput:
         wall = FakeResponse("<html></html>", url="https://www.facebook.com/login/?next=x")
         session = FakeSession({"https://www.facebook.com/private/videos": wall, "https://www.facebook.com/private/reels": wall})
         monkeypatch.setattr(commands, "FacebookCrawler",
-                            lambda config: FacebookCrawler(config, session=session, sleep=lambda _: None))
+                            lambda config, **kw: FacebookCrawler(config, session=session, sleep=lambda _: None, **kw))
         code, out, err = run(capsys, "facebook", "crawl", "private")
         assert code == EXIT_FAILURE and out == "" and "requires signing in" in err
 
@@ -581,7 +581,7 @@ class TestReleasePolish:
         session = FakeSession({f"{page}/videos": FakeResponse('<a href="/examplepage/videos/12345678901/">v</a>'),
                                f"{page}/reels": FakeResponse("")})
         monkeypatch.setattr(commands, "FacebookCrawler",
-                            lambda config: FacebookCrawler(config, session=session, sleep=lambda _: None))
+                            lambda config, **kw: FacebookCrawler(config, session=session, sleep=lambda _: None, **kw))
         code, _, err = run(capsys, "facebook", "crawl", page, "-q")
         assert code == EXIT_OK and err == ""  # quiet hides the notice too
         code, _, err = run(capsys, "facebook", "crawl", page, "-o", "fb.txt")

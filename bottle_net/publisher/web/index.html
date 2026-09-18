@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="bn-token" content="{{CSRF_TOKEN}}">
+  <title>Bottle Net — Video Publisher</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script type="module" src="/static/js/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-name">Bottle Net</span><span class="brand-sub">Video Publisher</span></div>
+      <nav id="nav" aria-label="Main"></nav>
+    </aside>
+    <main id="main" tabindex="-1"><p class="muted">Loading…</p></main>
+  </div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <dialog id="dialog" aria-labelledby="dialog-title"><div id="dialog-body"></div></dialog>
+</body>
+</html>
