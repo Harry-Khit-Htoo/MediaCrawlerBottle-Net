@@ -78,8 +78,11 @@ def safe_filename(
     text = text.strip("._ -")
     if not text:
         return fallback
-    if text.split(".")[0].upper() in WINDOWS_RESERVED_NAMES:
-        text = f"{text}_"
+    # Windows reserves device names even with an extension ("NUL.txt"), so
+    # the part before the first dot is what must change: "NUL.txt" -> "NUL_.txt".
+    first, dot, rest = text.partition(".")
+    if first.upper() in WINDOWS_RESERVED_NAMES:
+        text = f"{first}_{dot}{rest}"
     return text
 
 

@@ -90,6 +90,8 @@ class VideoInfo:
     duration: float | None = None
     #: Name of the file the video is (or will be) saved as.
     filename: str | None = None
+    #: True when a completed copy already exists (the download is skipped).
+    already_downloaded: bool = False
 
 
 class DownloadStatus(StrEnum):
@@ -203,7 +205,7 @@ class VideoDownloader:
 
                 existing = find_existing_download(dest_dir, info.id)
                 if existing:
-                    info = replace(info, filename=existing.name)
+                    info = replace(info, filename=existing.name, already_downloaded=True)
                     if on_info:
                         on_info(info)
                     return DownloadResult(url=url, status=DownloadStatus.SKIPPED, path=existing, info=info)

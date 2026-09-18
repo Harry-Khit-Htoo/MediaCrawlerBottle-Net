@@ -14,9 +14,11 @@ from __future__ import annotations
 import argparse
 import io
 import logging
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from bottle_net.config import Config
 from bottle_net.crawlers import CrawlResult, FacebookCrawler, TikTokCrawler
@@ -31,9 +33,11 @@ from bottle_net.downloaders import (
     get_downloader,
     run_batch,
 )
-from bottle_net.errors import BottleNetError, URLListError
+from bottle_net.errors import BottleNetError, InvalidURLError, UnsupportedURLError, URLListError
 from bottle_net.utils.console import UI
 from bottle_net.utils.files import (
+    NAME_DIRECTIVE,
+    OUTPUT_DIR_DIRECTIVE,
     URLList,
     atomic_write_text,
     batch_folder_name,
@@ -56,9 +60,9 @@ from bottle_net.utils.progress import CrawlProgress, DownloadProgress, format_by
 from bottle_net.utils.urls import (
     Platform,
     detect_platform,
+    ensure_scheme,
     parse_facebook_target,
     parse_tiktok_account,
-    tiktok_profile_url,
     tiktok_username_from_url,
 )
 
@@ -67,6 +71,22 @@ logger = logging.getLogger(__name__)
 EXIT_OK = 0
 EXIT_FAILURE = 1
 EXIT_INTERRUPTED = 130
+
+SUPPORTED_PLATFORMS_HINT = "Supported platforms:\n  - TikTok\n  - Facebook"
+PARTIAL_FILES_NOTE = (
+    "Partial files have been handled safely: unfinished downloads are kept as\n"
+    '".part" files, are never counted as completed, and resume on the next run.'
+)
+FACEBOOK_NOTE = [
+    "Facebook may expose only the first batch of public videos",
+    "without authentication. Results may therefore be incomplete.",
+    "",
+    "Bottle Net Tool does not use login credentials or private APIs.",
+]
+
+
+def _retry_line(attempt: int, error: BottleNetError, delay: float) -> str:
+    return f"[yellow]\\[!][/yellow] {error.label}. Retrying in {delay:.0f}s (attempt {attempt})."
 
 
 # ---------------------------------------------------------------------- crawl
@@ -106,11 +126,11 @@ def crawl(args: argparse.Namespace, config: Config, ui: UI) -> int:
     # Validate input before any network access; errors surface immediately.
     if platform is Platform.TIKTOK:
         name = parse_tiktok_account(args.target)
-        target_url = tiktok_profile_url(name)
+        target = f"@{name}"
         crawler: TikTokCrawler | FacebookCrawler = TikTokCrawler(config)
     else:
         page = parse_facebook_target(args.target)
-        name, target_url = page.name, page.url
+        name, target = page.name, page.url
         crawler = FacebookCrawler(config)
 
     # Capture the real stdout now, before any live display is started.
@@ -119,15 +139,12 @@ def crawl(args: argparse.Namespace, config: Config, ui: UI) -> int:
     output = choose_crawl_output(args.output, quiet=ui.quiet, stdout_is_terminal=stdout_tty)
     writer: URLWriter | None = fmt.stream_writer(data_stream) if output.to_stdout else None
 
-    ui.header(f"{platform.display_name} Video Crawler")
-    ui.field("Target", target_url)
-    if output.to_stdout:
-        ui.field("Output", "standard output")
-    elif output.path is not None:
-        ui.field("Output", display_path(output.path))
-    ui.console.print()
-    ui.info(f"Crawling {'@' + name if platform is Platform.TIKTOK else name}...")
-    ui.console.print()
+    ui.header(f"{platform.display_name} Crawler")
+    ui.field("Target", target)
+    ui.blank()
+    ui.info("Starting crawler")
+    ui.info("Discovering public videos")
+    ui.blank()
 
     def on_found(url: str) -> None:
         if writer is not None:
@@ -135,7 +152,7 @@ def crawl(args: argparse.Namespace, config: Config, ui: UI) -> int:
         progress.advance()
 
     def on_retry(attempt: int, error: BottleNetError, delay: float) -> None:
-        progress.print(f"[yellow]\\[!][/yellow] {error} - retrying in {delay:.0f}s (attempt {attempt})")
+        progress.print(_retry_line(attempt, error, delay))
 
     # When URLs are printed to the same terminal, a live bar would garble them.
     progress = CrawlProgress(ui.console, live=not (output.to_stdout and stdout_tty))
@@ -162,27 +179,35 @@ def crawl(args: argparse.Namespace, config: Config, ui: UI) -> int:
         writer.close()
 
     if interrupted:
-        ui.console.print()
+        ui.blank()
+        ui.warning("Crawl interrupted by user.")
+        ui.blank()
+        ui.field("Videos found", str(progress.found), width=13)
         if output.to_stdout and progress.found:
-            ui.warning(f"Crawl interrupted by user after {progress.found} URL(s) were written.")
+            ui.note(f"{progress.found} URL(s) had already been written to standard output.")
         else:
-            ui.warning("Crawl interrupted by user. Nothing was saved.")
+            ui.note("Nothing was saved.")
         return EXIT_INTERRUPTED
 
-    ui.console.print()
-    ui.info(f"Videos found: {len(result.urls)}")
+    ui.blank()
+    ui.field("Videos found", str(len(result.urls)), width=13)
+    ui.field("Duplicates", str(result.duplicates), width=13)
     for note in result.notes:
         ui.note(note)
+    if platform is Platform.FACEBOOK:
+        ui.blank()
+        ui.notice("Note:", FACEBOOK_NOTE)
 
     if not result.urls:
-        ui.console.print()
+        ui.blank()
         ui.warning("No video URLs to save.")
         return EXIT_FAILURE
 
     status = "Crawl completed" if result.complete else "Crawl completed (partial results)"
     if output.to_stdout:
+        ui.blank()
         ui.success(status)
-        ui.note(f"{len(result.urls)} URL(s) written to standard output.")
+        ui.saved("Output:", f"standard output ({len(result.urls)} URLs)")
         return EXIT_OK
 
     path = output.path or default_crawl_output_path(config.output_directory, platform, name, extension=fmt.extension)
@@ -191,16 +216,17 @@ def crawl(args: argparse.Namespace, config: Config, ui: UI) -> int:
         atomic_write_text(path, fmt.render(result.urls))
     except OSError as exc:
         raise BottleNetError(
-            f"Could not save the URL list to {display_path(path)}: {exc.strerror or exc}",
+            f"Could not write {display_path(path)}: {exc.strerror or exc}",
             hint="Choose another location with -o FILE, or redirect the output: > links.txt",
+            label="Could not save the URL list",
         ) from exc
 
-    ui.console.print()
+    ui.blank()
     ui.success(status)
-    ui.saved("Saved:", display_path(path))
+    ui.saved("Output:", display_path(path))
     if replaced:
         ui.note("The existing file was replaced.")
-    ui.console.print()
+    ui.blank()
     ui.note(f'Next: bottle-net {platform.value} download-list "{display_path(path)}"')
     return EXIT_OK
 
@@ -208,28 +234,24 @@ def crawl(args: argparse.Namespace, config: Config, ui: UI) -> int:
 # ------------------------------------------------------------------- download
 
 
-def _print_info(ui: UI, info: VideoInfo) -> None:
-    ui.field("Title", _shorten(info.title, 70))
-    if info.uploader:
-        ui.field("Uploader", info.uploader)
-    ui.field("Size", format_bytes(info.filesize) if info.filesize else "unknown")
-    ui.console.print()
-
-
 def _shorten(text: str, width: int) -> str:
     return text if len(text) <= width else text[: width - 3].rstrip() + "..."
+
+
+def unknown_url_error(url: str) -> BottleNetError:
+    """Explain why *url* cannot be handled by the universal commands."""
+    text = url.strip()
+    parts = urlsplit(ensure_scheme(text))
+    if parts.scheme not in ("http", "https") or not parts.hostname or "." not in parts.hostname:
+        return InvalidURLError(f"'{text}' is not a web address.", hint=SUPPORTED_PLATFORMS_HINT)
+    return UnsupportedURLError(f"{parts.hostname} is not a supported website.", hint=SUPPORTED_PLATFORMS_HINT)
 
 
 def download(args: argparse.Namespace, config: Config, ui: UI) -> int:
     """``bottle-net [<platform>] download <URL>``."""
     platform: Platform | None = args.platform or detect_platform(args.url)
     if platform is None:
-        ui.err.print("[bold red]\\[!][/bold red] Unsupported or unknown URL.")
-        ui.err.print()
-        ui.err.print("Supported platforms:")
-        for supported in Platform:
-            ui.err.print(f"  - {supported.display_name}")
-        return EXIT_FAILURE
+        raise unknown_url_error(args.url)
 
     downloader = get_downloader(platform, config)
     # Validate before printing anything else so bad input fails fast.
@@ -237,22 +259,22 @@ def download(args: argparse.Namespace, config: Config, ui: UI) -> int:
     dest_dir: Path = args.dir or config.platform_download_dir(platform)
 
     ui.header(f"{platform.display_name} Downloader")
-    ui.info(f"Processing {platform.display_name} video")
-    ui.console.print()
 
     progress = DownloadProgress(ui.console)
-    started = False
 
     def on_info(info: VideoInfo) -> None:
-        nonlocal started
-        _print_info(ui, info)
-        ui.console.print("[bold]Downloading:[/bold]")
+        ui.field("Title", _shorten(info.title, 70), width=6)
+        ui.field("File", info.filename or "?", width=6)
+        ui.field("Size", format_bytes(info.filesize) if info.filesize else "unknown", width=6)
+        ui.blank()
+        if info.already_downloaded:
+            return
+        ui.console.print("[bold]Downloading[/bold]")
         progress.progress.start()
         progress.start_file()
-        started = True
 
     def on_retry(attempt: int, error: BottleNetError, delay: float) -> None:
-        ui.console.print(f"[yellow]\\[!][/yellow] {error} - retrying in {delay:.0f}s (attempt {attempt})")
+        progress.print(_retry_line(attempt, error, delay))
 
     try:
         result = downloader.download(args.url, dest_dir, progress_hook=progress.hook, on_info=on_info, on_retry=on_retry)
@@ -261,27 +283,27 @@ def download(args: argparse.Namespace, config: Config, ui: UI) -> int:
         else:
             progress.hide_file()
     except KeyboardInterrupt:
-        progress.progress.stop()
-        ui.console.print()
-        ui.warning("Download interrupted. Run the same command again to resume.")
+        progress.stop()
+        ui.err.print()
+        ui.error("Download interrupted by user.")
+        ui.err.print()
+        ui.err.print(PARTIAL_FILES_NOTE)
         return EXIT_INTERRUPTED
     finally:
-        if started:
-            progress.progress.stop()
+        progress.stop()
 
-    return _report_single(ui, result)
-
-
-def _report_single(ui: UI, result: DownloadResult) -> int:
-    ui.console.print()
     if result.status is DownloadStatus.FAILED:
-        error = result.error
-        ui.error("Download failed", reason=result.reason, hint=error.hint if error else None)
+        assert result.error is not None
+        ui.failure(result.error)
         return EXIT_FAILURE
     assert result.path is not None
     if result.status is DownloadStatus.SKIPPED:
         ui.success("Already downloaded - skipped")
     else:
+        if progress.average_speed:
+            ui.blank()
+            ui.field("Speed", f"{format_bytes(progress.average_speed)}/s (average)")
+        ui.blank()
         ui.success("Download completed")
     ui.saved("Saved:", display_path(result.path))
     return EXIT_OK
@@ -328,27 +350,35 @@ def download_list(args: argparse.Namespace, config: Config, ui: UI) -> int:
             hint=f"Add one video URL per line, or create a list with: {command}",
         )
 
-    name = args.name or default_batch_name(url_list, platform)
+    # A failed-URL file remembers where its videos belong, so retrying it never
+    # creates a new folder (an explicit --output-dir or --name still wins).
+    recorded_dir = url_list.directives.get(OUTPUT_DIR_DIRECTIVE)
+    recorded_name = url_list.directives.get(NAME_DIRECTIVE)
+    output_dir: Path | None = args.dir
+    if output_dir is None and args.name is None and recorded_dir:
+        output_dir = Path(recorded_dir)
+    name = args.name or (recorded_name if output_dir is None else None) or default_batch_name(url_list, platform)
     failed_file: Path = args.failed_file or config.output_directory / f"failed_{platform.value if platform else 'downloads'}.txt"
 
     downloader: BatchDownloader
     if platform is not None:
         downloader = get_downloader(platform, config)
-        dest_dir: Path = args.dir or config.platform_download_dir(platform) / name
+        dest_dir: Path = output_dir or config.platform_download_dir(platform) / name
         save_to = display_path(dest_dir)
     else:
-        auto = AutoDownloader(config, lambda p: get_downloader(p, config), subfolder=None if args.dir else name)
-        downloader = auto
-        dest_dir = args.dir or config.download_directory
-        save_to = display_path(dest_dir) if args.dir else display_path(dest_dir / "<platform>" / name)
+        downloader = AutoDownloader(config, lambda p: get_downloader(p, config), subfolder=None if output_dir else name)
+        dest_dir = output_dir or config.download_directory
+        save_to = display_path(dest_dir) if output_dir else display_path(dest_dir / "<platform>" / name)
 
     ui.header(f"{platform.display_name} Batch Downloader" if platform else "Batch Downloader")
     ui.field("URL list", url_list.source)
-    ui.field("Videos", str(len(url_list.urls)))
+    ui.field("Total", str(len(url_list.urls)))
     if url_list.duplicates:
         ui.note(f"Ignored {url_list.duplicates} duplicate URL(s).")
     ui.field("Save to", save_to)
-    ui.console.print()
+    if args.dir is None and args.name is None and (recorded_dir or recorded_name):
+        ui.note("Using the download folder recorded in this failed-URL list.")
+    ui.blank()
 
     total = len(url_list.urls)
     width = len(str(total))
@@ -377,7 +407,7 @@ def download_list(args: argparse.Namespace, config: Config, ui: UI) -> int:
         progress.advance_overall(index)
 
     def on_retry(attempt: int, error: BottleNetError, delay: float) -> None:
-        progress.print(f"  [yellow]\\[!][/yellow] {error} - retrying in {delay:.0f}s (attempt {attempt})")
+        progress.print("  " + _retry_line(attempt, error, delay))
 
     callbacks = BatchCallbacks(
         on_start=on_start, on_info=on_info, on_result=on_result, on_retry=on_retry, progress_hook=progress.hook
@@ -387,62 +417,105 @@ def download_list(args: argparse.Namespace, config: Config, ui: UI) -> int:
 
     # Retrying must put videos back in the same folder(s): name the exact
     # folder, or for the universal default layout, the batch name.
-    retry_dir: Path | None = dest_dir if platform is not None else args.dir
-    return _report_batch(ui, summary, failed_file, platform, destination=retry_dir,
-                         name=None if retry_dir else name)
+    retry_dir: Path | None = dest_dir if platform is not None else output_dir
+    retry = RetryInfo(failed_file, platform, retry_dir, None if retry_dir else name)
+    return _report_batch(ui, summary, retry)
 
 
-def _report_batch(
-    ui: UI,
-    summary: BatchSummary,
-    failed_file: Path,
-    platform: Platform | None,
-    *,
-    destination: Path | None = None,
-    name: str | None = None,
-) -> int:
+@dataclass(frozen=True)
+class RetryInfo:
+    """Everything needed to write the failed-URL file and its retry command."""
+
+    failed_file: Path
+    platform: Platform | None
+    destination: Path | None
+    name: str | None
+
+    def command(self, *, multiline: bool = False) -> str:
+        return retry_command(
+            self.failed_file, self.platform, destination=self.destination, name=self.name, multiline=multiline
+        )
+
+
+def _report_batch(ui: UI, summary: BatchSummary, retry: RetryInfo) -> int:
+    # After Ctrl+C, URLs that were never attempted are "remaining", not failed.
+    failed = summary.failed - len(summary.not_attempted) if summary.interrupted else summary.failed
+    ui.blank()
+    ui.counts([
+        ("Successful", summary.completed, "green"),
+        ("Failed", failed, "red" if failed else "dim"),
+        ("Skipped", summary.skipped, "dim"),
+    ])
+
+    if summary.failures:
+        write_failed_urls(
+            retry.failed_file, summary.failures, platform=retry.platform,
+            destination=retry.destination, name=retry.name,
+        )
+    elif retry.failed_file.exists():
+        # Keep the failed-URL file in sync with the latest run.
+        write_failed_urls(retry.failed_file, [], platform=retry.platform,
+                          destination=retry.destination, name=retry.name)
+
     if summary.interrupted:
-        ui.console.print()
-        ui.warning("Interrupted by user. Unfinished URLs are recorded below so you can resume.")
+        return _report_interrupted(ui, summary, retry)
+
     if summary.aborted_reason:
-        ui.console.print()
+        ui.blank()
         ui.warning(summary.aborted_reason)
 
-    ui.summary(
-        "Download Summary",
-        [
-            ("Successful", summary.completed, "green"),
-            ("Failed", summary.failed, "red" if summary.failed else "dim"),
-            ("Skipped", summary.skipped, "dim"),
-        ],
-    )
-
-    retry = retry_command(failed_file, platform, destination=destination, name=name)
     if summary.failures:
-        write_failed_urls(failed_file, summary.failures, platform=platform, destination=destination, name=name)
-        ui.saved("Failed URLs:", display_path(failed_file))
-        ui.note(f"Retry them with: {retry}")
-    elif failed_file.exists():
-        # Keep the failed-URL file in sync with the latest run.
-        write_failed_urls(failed_file, [], platform=platform, destination=destination, name=name)
+        ui.saved("Failed URLs:", display_path(retry.failed_file))
+        ui.blank()
+        ui.warning(f"{summary.failed} download(s) failed.")
+        _print_retry_command(ui, "Retry failed downloads with:", retry)
 
     if summary.folders:
-        ui.console.print()
-        ui.success("Downloads saved to:")
-        for folder in summary.folders:
-            ui.console.print(f"  {display_path(folder)}")
-    ui.console.print()
+        ui.saved("Downloads saved to:", "\n  ".join(display_path(folder) for folder in summary.folders))
+    ui.blank()
 
-    if summary.interrupted:
-        return EXIT_INTERRUPTED
     if summary.failed:
-        ui.warning(f"Finished with {summary.failed} failure(s).")
+        ui.warning(f"Batch completed with {summary.failed} failure(s).")
         if ui.quiet:
             ui.error(
                 f"{summary.failed} of {summary.total} download(s) failed. "
-                f"Failed URLs were saved to {display_path(failed_file)}",
-                hint=f"Retry with: {retry}",
+                f"Failed URLs were saved to {display_path(retry.failed_file)}",
+                hint=f"Retry with: {retry.command()}",
             )
         return EXIT_FAILURE
-    ui.success("Finished")
+    ui.success("Batch completed")
     return EXIT_OK
+
+
+def _report_interrupted(ui: UI, summary: BatchSummary, retry: RetryInfo) -> int:
+    """Summary after Ctrl+C. Always shown (also with --quiet): the user asked to stop."""
+    ui.err.print()
+    ui.error("Download interrupted by user.")
+    ui.err.print()
+    width = len("Completed:") + 1
+    ui.err.print(f"{'Completed:':<{width}} {summary.completed + summary.skipped:>4}")
+    failed_now = summary.failed - len(summary.not_attempted)
+    if failed_now:
+        ui.err.print(f"{'Failed:':<{width}} {failed_now:>4}")
+    ui.err.print(f"{'Remaining:':<{width}} {len(summary.not_attempted):>4}")
+    ui.err.print()
+    ui.err.print(PARTIAL_FILES_NOTE)
+    if summary.failures:
+        ui.err.print()
+        ui.err.print(f"Unfinished URLs were saved to {display_path(retry.failed_file)}")
+        ui.err.print()
+        ui.err.print("Resume with:")
+        ui.err.print()
+        ui.err.print("  " + retry.command(multiline=os.name != "nt").replace("\n", "\n  "))
+    return EXIT_INTERRUPTED
+
+
+def _print_retry_command(ui: UI, title: str, retry: RetryInfo) -> None:
+    # A "\" line continuation only works in POSIX shells; on Windows
+    # (PowerShell / Command Prompt) the command is printed on one line.
+    command = retry.command(multiline=os.name != "nt")
+    ui.blank()
+    ui.console.print(title)
+    ui.blank()
+    for line in command.splitlines():
+        ui.console.print(f"  {line}", markup=False)

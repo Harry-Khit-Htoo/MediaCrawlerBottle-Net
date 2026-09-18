@@ -4,8 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bottle-net"
-version = "1.0.0"
-description = "Bottle Net Tool - crawl and download publicly accessible TikTok and Facebook videos from the command line."
+# The version is defined once, in bottle_net/__init__.py.
+dynamic = ["version"]
+description = "Bottle Net Tool: a command-line crawler and downloader for publicly accessible TikTok and Facebook videos."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -17,6 +18,9 @@ classifiers = [
     "Environment :: Console",
     "Intended Audience :: End Users/Desktop",
     "Operating System :: OS Independent",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.11",
@@ -33,10 +37,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10", "types-requests"]
 
 [project.scripts]
 bottle-net = "bottle_net.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "bottle_net.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["bottle_net*"]

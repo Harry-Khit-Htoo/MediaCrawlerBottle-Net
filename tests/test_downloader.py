@@ -25,6 +25,7 @@ from bottle_net.errors import (
     ExtractionError,
     LoginRequiredError,
     NetworkError,
+    NetworkTimeoutError,
     PrivateContentError,
     RateLimitedError,
     StorageError,
@@ -59,11 +60,11 @@ class TestClassifyError:
             (DownloadError("ERROR: [facebook] 1: You must log in to continue. Use --cookies"), LoginRequiredError),
             (DownloadError("ERROR: Please solve the CAPTCHA"), BlockedError),
             (DownloadError("ERROR: This video is DRM protected"), BlockedError),
-            (DownloadError("ERROR: Read timed out."), NetworkError),
+            (DownloadError("ERROR: Read timed out."), NetworkTimeoutError),
             (DownloadError("ERROR: unable to open for writing: [Errno 2] No such file or directory"), StorageError),
             (DownloadError("ERROR: [TikTok] 1: Unable to extract universal data; please report this issue"),
              ExtractionError),
-            (TimeoutError("timed out"), NetworkError),
+            (TimeoutError("timed out"), NetworkTimeoutError),
         ],
     )
     def test_mapping(self, error: BaseException, expected: type) -> None:
@@ -75,9 +76,33 @@ class TestClassifyError:
         assert not classify_error(http_error(404)).retryable
 
     def test_boilerplate_is_removed(self) -> None:
-        message = str(classify_error(DownloadError("ERROR: [TikTok] 1: Weird thing; please report this issue on GitHub")))
-        assert "please report" not in message.lower()
-        assert "Weird thing" in message
+        error = classify_error(DownloadError("ERROR: [TikTok] 1: Weird thing; please report this issue on GitHub"))
+        assert error.detail == "Weird thing"
+        assert "please report" not in str(error).lower()
+
+    def test_unknown_extraction_failure_suggests_updating(self) -> None:
+        error = classify_error(DownloadError("ERROR: [TikTok] 1: Unable to extract universal data"))
+        assert error.label == "Unable to extract this video"
+        assert "may have changed" in str(error)
+        assert error.hint and "pip install --upgrade yt-dlp" in error.hint
+
+    @pytest.mark.parametrize(
+        ("error", "headline"),
+        [
+            (http_error(404), "Video unavailable"),
+            (DownloadError("ERROR: Read timed out."), "Network timeout"),
+            (DownloadError("ERROR: You must log in"), "Login is required"),
+            (http_error(429), "Rate limit detected"),
+        ],
+    )
+    def test_headlines(self, error: BaseException, headline: str) -> None:
+        assert classify_error(error).label == headline
+
+    def test_secrets_are_redacted_from_details(self) -> None:
+        error = classify_error(DownloadError(
+            "ERROR: HTTP Error 403: Forbidden for https://cdn.example/v.mp4?x-signature=SECRET&token=T0K3N"
+        ))
+        assert "SECRET" not in (error.detail or "") and "T0K3N" not in (error.detail or "")
 
 
 # ------------------------------------------------------------------ retries

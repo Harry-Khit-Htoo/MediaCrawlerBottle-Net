@@ -155,7 +155,7 @@ def parse_tiktok_account(value: str) -> str:
     """Extract a TikTok username from ``@name``, ``name`` or a profile URL."""
     text = value.strip()
     if not text:
-        raise InvalidURLError("No TikTok account given.")
+        raise InvalidURLError("No TikTok account given.", label="Username is invalid")
 
     if "tiktok.com" in text.lower() or "://" in text:
         host, path, _ = _split(text)
@@ -176,6 +176,7 @@ def parse_tiktok_account(value: str) -> str:
         raise InvalidURLError(
             f"'{value.strip()}' is not a valid TikTok username.",
             hint="Usernames contain only letters, numbers, underscores and periods (e.g. @example).",
+            label="Username is invalid",
         )
     return username
 
@@ -255,7 +256,7 @@ def parse_facebook_target(value: str) -> FacebookTarget:
     """Parse a Facebook Page/profile name or URL into a :class:`FacebookTarget`."""
     text = value.strip()
     if not text:
-        raise InvalidURLError("No Facebook Page or profile given.")
+        raise InvalidURLError("No Facebook Page or profile given.", label="Page name is invalid")
 
     if "facebook.com" in text.lower() or "fb.com" in text.lower() or "://" in text:
         host, path, query = _split(text)
@@ -292,7 +293,7 @@ def parse_facebook_target(value: str) -> FacebookTarget:
 
     name = text.removeprefix("@")
     if not FACEBOOK_SLUG_RE.match(name):
-        raise InvalidURLError(f"'{value.strip()}' is not a valid Facebook Page name.")
+        raise InvalidURLError(f"'{value.strip()}' is not a valid Facebook Page name.", label="Page name is invalid")
     return FacebookTarget(name=name, url=f"https://www.facebook.com/{name}")
 
 

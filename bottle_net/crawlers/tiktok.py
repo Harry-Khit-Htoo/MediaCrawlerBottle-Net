@@ -80,7 +80,9 @@ class TikTokCrawler:
             if on_retry is None:
                 return
             if isinstance(error, ExtractionError):
-                error = ExtractionError("TikTok did not return the profile data")
+                error = ExtractionError(
+                    "TikTok did not return the profile data", label="TikTok did not return the profile data"
+                )
             on_retry(attempt, error, delay)
 
         with self._factory(self.options()) as ydl:

@@ -200,8 +200,9 @@ class TestCrawlOutput:
         assert code == EXIT_OK
         assert out.splitlines() == CRAWLED
         assert out == "".join(f"{u}\n" for u in CRAWLED)
-        for status in ("TikTok Video Crawler", "Crawling @example", "Videos found: 3", "Crawl completed",
-                       "written to standard output"):
+        for status in ("TikTok Crawler", "Target: @example", "Starting crawler", "Discovering public videos",
+                       "Progress:", "Videos found: 3", "Duplicates:   1", "Crawl completed",
+                       "standard output (3 URLs)"):
             assert status in err
         assert "[+]" not in out and "Videos found" not in out and "✓" not in out
         assert not (workdir / "output").exists()  # nothing saved behind the user's back
@@ -224,7 +225,7 @@ class TestCrawlOutput:
         assert code == EXIT_OK
         assert out == ""
         assert (workdir / "example-links.txt").read_text(encoding="utf-8") == "".join(f"{u}\n" for u in CRAWLED)
-        assert "Saved:" in err and "example-links.txt" in err
+        assert "Output:" in err and "example-links.txt" in err
 
     def test_output_file_is_replaced_with_notice(self, profile: FakeYDLFactory, workdir: Path,
                                                  capsys: pytest.CaptureFixture[str]) -> None:
@@ -327,7 +328,8 @@ class TestDownloadCommand:
         assert out == ""  # status is not data
         assert (workdir / "downloads" / "tiktok" / "Example_video_1.mp4").is_file()
         assert "Download completed" in err and "Title: Example video" in err and "100%" in err
-        assert "Size: 2.0 KB" in err
+        assert "File:  Example_video_1.mp4" in err and "Size:  2.0 KB" in err and "Downloading" in err
+        assert "Saved:" in err
 
     def test_quiet_download(self, fake_ydl: FakeYDLFactory, capsys: pytest.CaptureFixture[str]) -> None:
         fake_ydl.add(TIKTOK_URL.format(1), FakeVideo("1"))
@@ -351,7 +353,15 @@ class TestDownloadCommand:
     def test_unknown_url(self, capsys: pytest.CaptureFixture[str]) -> None:
         code, _, err = run(capsys, "download", "https://example.com/video")
         assert code == EXIT_FAILURE
-        assert "Unsupported or unknown URL" in err and "TikTok" in err and "Facebook" in err
+        assert "[!] Unsupported platform." in err and "example.com" in err
+        assert "Supported platforms:" in err and "TikTok" in err and "Facebook" in err
+
+    @pytest.mark.parametrize("value", ["not-a-url", "", "ftp:/x"])
+    def test_not_a_url(self, value: str, capsys: pytest.CaptureFixture[str]) -> None:
+        code, out, err = run(capsys, "download", value)
+        assert code == EXIT_FAILURE and out == ""
+        assert "[!] URL is invalid." in err and "Supported platforms:" in err
+        assert "Traceback" not in err
 
     def test_invalid_url(self, fake_ydl: FakeYDLFactory, capsys: pytest.CaptureFixture[str]) -> None:
         code, _, err = run(capsys, "tiktok", "download", "https://www.tiktok.com/@someone")
@@ -362,12 +372,12 @@ class TestDownloadCommand:
     def test_unavailable_video(self, fake_ydl: FakeYDLFactory, capsys: pytest.CaptureFixture[str]) -> None:
         code, _, err = run(capsys, "tiktok", "download", TIKTOK_URL.format(404))
         assert code == EXIT_FAILURE
-        assert "Download failed" in err and "unavailable" in err
+        assert "[!] Video unavailable." in err and "deleted" in err
 
     def test_errors_still_shown_when_quiet(self, fake_ydl: FakeYDLFactory, capsys: pytest.CaptureFixture[str]) -> None:
         code, out, err = run(capsys, "tiktok", "download", TIKTOK_URL.format(404), "--quiet")
         assert code == EXIT_FAILURE and out == ""
-        assert "Download failed" in err and "Downloader" not in err
+        assert "[!] Video unavailable." in err and "Downloader" not in err
 
     def test_already_downloaded(self, fake_ydl: FakeYDLFactory, capsys: pytest.CaptureFixture[str]) -> None:
         fake_ydl.add(TIKTOK_URL.format(3), FakeVideo("3"))
@@ -435,7 +445,7 @@ class TestDownloadListCommand:
         fake_ydl.add("https://www.facebook.com/watch/?v=111111", FakeVideo("111111"))
         path = write_list(workdir, "facebook_examplepage_links.txt", ["https://www.facebook.com/watch/?v=111111"])
         code, _, err = run(capsys, "facebook", "download-list", str(path))
-        assert code == EXIT_OK and "Finished" in err
+        assert code == EXIT_OK and "Batch completed" in err
         assert list((workdir / "downloads" / "facebook" / "examplepage").glob("*_111111.mp4"))
 
     def test_from_stdin(self, fake_ydl: FakeYDLFactory, workdir: Path, monkeypatch: pytest.MonkeyPatch,
@@ -519,7 +529,10 @@ class TestInterruptionsAndNetworkFailures:
         path.write_text("\n".join(TIKTOK_URL.format(i) for i in (1, 2, 3)), encoding="utf-8")
         code, _, err = run(capsys, "tiktok", "download-list", str(path))
         assert code == EXIT_INTERRUPTED
-        assert "Interrupted by user" in err
+        assert "[!] Download interrupted by user." in err
+        assert "Completed:     1" in err and "Remaining:     2" in err
+        assert "Partial files have been handled safely" in err
+        assert "--output-dir" in err and "Traceback" not in err
         failed = (workdir / "output" / "failed_tiktok.txt").read_text(encoding="utf-8")
         assert TIKTOK_URL.format(2) in failed and TIKTOK_URL.format(3) in failed
         assert TIKTOK_URL.format(1) + "\n" not in failed
@@ -533,7 +546,9 @@ class TestInterruptionsAndNetworkFailures:
         path.write_text(f"{TIKTOK_URL.format(1)}\n{TIKTOK_URL.format(2)}\n", encoding="utf-8")
         code, _, err = run(capsys, "tiktok", "download-list", str(path))
         assert code == EXIT_FAILURE
-        assert "retrying" in err  # max_retries = 1 in the test config
+        assert "[!] Network error. Retrying in" in err  # max_retries = 1 in the test config
+        assert "[!] 1 download(s) failed." in err and "Retry failed downloads with:" in err
+        assert "--output-dir" in err and "videos" in err
         assert "Successful:    1" in err and "Failed:        1" in err
         failed = (workdir / "output" / "failed_tiktok.txt").read_text(encoding="utf-8")
         assert "# Network error" in failed and TIKTOK_URL.format(1) in failed
@@ -545,10 +560,51 @@ class TestInterruptionsAndNetworkFailures:
         fake_ydl.playlists[PROFILE] = [flaky, lambda: iter([{"url": CRAWLED[0]}])]
         code, out, err = run(capsys, "tiktok", "crawl", "@example")
         assert code == EXIT_OK and out.splitlines() == CRAWLED[:1]
-        assert "TikTok did not return the profile data - retrying" in err
+        assert "[!] TikTok did not return the profile data. Retrying in" in err
 
 
 def test_invalid_config_is_reported(workdir: Path, capsys: pytest.CaptureFixture[str]) -> None:
     (workdir / "config.toml").write_text("max_retries = -4\n", encoding="utf-8")
     code, _, err = run(capsys, "download", TIKTOK_URL.format(1))
     assert code == EXIT_FAILURE and "max_retries" in err
+
+
+class TestReleasePolish:
+    def test_output_dir_alias(self) -> None:
+        for flag in ("-d", "--output-dir", "--dir"):
+            args = build_parser().parse_args(["tiktok", "download-list", "f.txt", flag, "x"])
+            assert args.dir == Path("x")
+
+    def test_facebook_notice(self, workdir: Path, monkeypatch: pytest.MonkeyPatch,
+                             capsys: pytest.CaptureFixture[str]) -> None:
+        page = "https://www.facebook.com/examplepage"
+        session = FakeSession({f"{page}/videos": FakeResponse('<a href="/examplepage/videos/12345678901/">v</a>'),
+                               f"{page}/reels": FakeResponse("")})
+        monkeypatch.setattr(commands, "FacebookCrawler",
+                            lambda config: FacebookCrawler(config, session=session, sleep=lambda _: None))
+        code, _, err = run(capsys, "facebook", "crawl", page, "-q")
+        assert code == EXIT_OK and err == ""  # quiet hides the notice too
+        code, _, err = run(capsys, "facebook", "crawl", page, "-o", "fb.txt")
+        assert "[!] Note:" in err and "first batch of public videos" in err
+        assert "does not use login credentials or private APIs" in err
+
+    def test_retry_without_flags_uses_original_folder(
+        self, fake_ydl: FakeYDLFactory, workdir: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        flaky = FakeVideo("7", extract_errors=[network_error()] * 2)  # fails twice (max_retries=1), then works
+        fake_ydl.add(TIKTOK_URL.format(7), flaky)
+        path = write_list(workdir, "tiktok_example_links.txt", [TIKTOK_URL.format(7)])
+        assert run(capsys, "tiktok", "download-list", str(path))[0] == EXIT_FAILURE
+        code, _, err = run(capsys, "tiktok", "download-list", "output/failed_tiktok.txt")
+        assert code == EXIT_OK and "recorded" in err
+        assert list((workdir / "downloads" / "tiktok" / "example").glob("*_7.mp4"))
+        assert not (workdir / "downloads" / "tiktok" / "failed_tiktok").exists()
+
+    def test_universal_retry_keeps_batch_name(
+        self, fake_ydl: FakeYDLFactory, workdir: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        fake_ydl.add(TIKTOK_URL.format(8), FakeVideo("8", extract_errors=[network_error()] * 2))
+        path = write_list(workdir, "mixed.txt", [TIKTOK_URL.format(8)])
+        run(capsys, "download-list", str(path))
+        assert run(capsys, "download-list", "output/failed_downloads.txt")[0] == EXIT_OK
+        assert list((workdir / "downloads" / "tiktok" / "mixed").glob("*_8.mp4"))

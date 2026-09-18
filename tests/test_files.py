@@ -126,13 +126,13 @@ class TestNames:
         ("title", "expected"),
         [
             ("Example video", "Example_video"),
-            ('Bad <chars>: "a/b\\c" | what? *', "Bad_chars_a_b_c_what"),
+            ('Bad <chars>: "a/b\\c" | what? *', "Bad_chars_a-b-c_what"),
             ("  spaced   out  ", "spaced_out"),
             ("Wait for it...", "Wait_for_it"),
             ("မြန်မာ ဗီဒီယို", "မြန်မာ_ဗီဒီယို"),
             ("", "video"),
             ("...", "video"),
-            ("CON", "video"),
+            ("CON", "CON_"),
         ],
     )
     def test_safe_filename(self, title: str, expected: str) -> None:
@@ -161,8 +161,22 @@ class TestNames:
         assert retry_command(Path("f.txt"), Platform.TIKTOK) == 'bottle-net tiktok download-list "f.txt"'
         assert retry_command(Path("f.txt"), None, name="stdin") == 'bottle-net download-list "f.txt" --name "stdin"'
         assert retry_command(Path("f.txt"), Platform.FACEBOOK, destination=Path("d")) == (
-            'bottle-net facebook download-list "f.txt" -d "d"'
+            'bottle-net facebook download-list "f.txt" --output-dir "d"'
         )
+        assert retry_command(Path("f.txt"), Platform.TIKTOK, destination=Path("d"), multiline=True) == (
+            'bottle-net tiktok download-list "f.txt" \\\n  --output-dir "d"'
+        )
+
+    def test_failed_file_records_destination(self, tmp_path: Path) -> None:
+        path = tmp_path / "failed.txt"
+        dest = tmp_path / "downloads" / "tiktok" / "example"
+        write_failed_urls(path, [FailedURL("https://www.tiktok.com/@a/video/1", "x")],
+                          platform=Platform.TIKTOK, destination=dest)
+        result = read_url_list(path)
+        assert result.urls == ["https://www.tiktok.com/@a/video/1"]
+        assert Path(result.directives["output-dir"]) == dest.resolve()
+        write_failed_urls(path, [], platform=None, name="mixed")
+        assert read_url_list(path).directives == {"name": "mixed"}
 
     @pytest.mark.parametrize(
         ("name", "platform", "expected"),
@@ -204,3 +218,18 @@ class TestDirectories:
 
     def test_find_existing_download_missing_dir(self, tmp_path: Path) -> None:
         assert find_existing_download(tmp_path / "nope", "1") is None
+
+
+@pytest.mark.parametrize(
+    "leftover",
+    ["Title_123.mp4.part", "Title_123.mp4.part-Frag3", "Title_123.mp4.ytdl", "Title_123.temp.mp4",
+     "Title_123.f137.mp4", "Title_123.mp4.tmp"],
+)
+def test_unfinished_ytdlp_files_are_never_treated_as_complete(tmp_path: Path, leftover: str) -> None:
+    (tmp_path / leftover).write_bytes(b"partial data")
+    assert find_existing_download(tmp_path, "123") is None
+
+
+def test_empty_file_is_not_complete(tmp_path: Path) -> None:
+    (tmp_path / "Title_123.mp4").write_bytes(b"")
+    assert find_existing_download(tmp_path, "123") is None

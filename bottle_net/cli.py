@@ -26,7 +26,7 @@ from bottle_net import APP_NAME, __author__, __version__
 from bottle_net.config import load_config
 from bottle_net.errors import BottleNetError
 from bottle_net.utils.console import UI
-from bottle_net.utils.files import safe_filename
+from bottle_net.utils.filenames import safe_filename
 from bottle_net.utils.logger import setup_logging
 from bottle_net.utils.output import DEFAULT_FORMAT, OUTPUT_FORMATS
 from bottle_net.utils.urls import Platform
@@ -47,6 +47,7 @@ Usage:
   {PROG} <platform> <command> [OPTIONS]
   {PROG} download <URL> [OPTIONS]
   {PROG} download-list <FILE | -> [OPTIONS]
+  {PROG} doctor
 
 Platforms:
   tiktok         TikTok tools
@@ -56,8 +57,10 @@ Commands:
   crawl          Find public video URLs on an account/Page
   download       Download one video
   download-list  Download every video in a URL list (a file, or - for stdin)
+  doctor         Check that Python, yt-dlp, FFmpeg and folders are ready
 
 Examples:
+  {PROG} doctor
   {PROG} tiktok crawl @username
   {PROG} tiktok crawl @username -o links.txt
   {PROG} tiktok download <URL>
@@ -299,7 +302,8 @@ def _add_download(sub: Any, platform: Platform | None) -> None:
         usage="%(prog)s <URL> [OPTIONS]",
     )
     parser.add_argument("url", metavar="URL", help=f"{name} video URL")
-    parser.add_argument("-d", "--dir", metavar="DIR", type=Path, help=f"Save the video in DIR (default: {default_dir})")
+    parser.add_argument("-d", "--output-dir", "--dir", dest="dir", metavar="DIR", type=Path,
+                        help=f"Save the video in DIR (default: {default_dir})")
     _add_quiet(parser)
     _add_help(parser)
     _global_options(parser, suppress=True)
@@ -341,7 +345,7 @@ def _add_download_list(sub: Any, platform: Platform | None) -> None:
         usage="%(prog)s <FILE | -> [OPTIONS]",
     )
     parser.add_argument("file", metavar="FILE", help="Text file with one video URL per line, or '-' for standard input")
-    parser.add_argument("-d", "--dir", metavar="DIR", type=Path,
+    parser.add_argument("-d", "--output-dir", "--dir", dest="dir", metavar="DIR", type=Path,
                         help=f"Save videos in DIR (default: {default_dir})")
     parser.add_argument("--name", metavar="NAME", type=_folder_name,
                         help="Sub-folder name for this batch (default: from the list's filename)")
@@ -389,16 +393,32 @@ def build_parser() -> Parser:
 
     _add_download(platforms, None)
     _add_download_list(platforms, None)
+    _add_doctor(platforms)
     return parser
 
 
+def _add_doctor(sub: Any) -> None:
+    parser = sub.add_parser(
+        "doctor",
+        help="Check that everything Bottle Net Tool needs is ready",
+        description=(
+            "Check the Python version, yt-dlp, FFmpeg, the configuration file, and\n"
+            "whether the download and output folders are writable.\n\n"
+            "All checks are local: no videos are downloaded and TikTok/Facebook\n"
+            "are not contacted. FFmpeg is optional."
+        ),
+        epilog=_examples([f"{PROG} doctor", f"{PROG} doctor --config my-config.toml"]),
+        prog=f"{PROG} doctor",
+        usage="%(prog)s [OPTIONS]",
+    )
+    _add_help(parser)
+    _global_options(parser, suppress=True)
+    parser.set_defaults(action="doctor", platform=None)
+
+
 def version_text() -> str:
-    """Return the ``--version`` output."""
-    try:
-        from yt_dlp.version import __version__ as ytdlp_version
-    except ImportError:  # pragma: no cover - yt-dlp is a hard dependency
-        ytdlp_version = "not installed"
-    return f"{APP_NAME} {__version__}\nAuthor: {__author__}\nyt-dlp {ytdlp_version}"
+    """Return the ``--version`` output (the version lives in ``bottle_net/__init__.py``)."""
+    return f"{APP_NAME} {__version__}\nAuthor: {__author__}"
 
 
 def _configure_streams() -> None:
@@ -423,7 +443,19 @@ def _configure_streams() -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Entry point for the ``bottle-net`` command. Returns an exit code."""
+    """Entry point for the ``bottle-net`` command. Returns an exit code.
+
+    Ctrl+C never produces a Python traceback: commands report what was
+    finished, and anything else exits with code 130.
+    """
+    try:
+        return _run(argv)
+    except KeyboardInterrupt:
+        sys.stderr.write("\n[!] Interrupted by user.\n")
+        return EXIT_INTERRUPTED
+
+
+def _run(argv: Sequence[str] | None) -> int:
     _configure_streams()
     args_list = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
@@ -447,6 +479,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(_platform_help(platform) if platform else MAIN_HELP)
         return EXIT_OK
 
+    if action == "doctor":
+        # The doctor report is the command's output, so it goes to stdout.
+        # It loads the configuration itself so that it can report problems.
+        from bottle_net.doctor import run_doctor
+
+        return run_doctor(Console(highlight=False, no_color=no_color), config_path=getattr(args, "config", None))
+
     # Imported lazily so that `-h` stays fast.
     from bottle_net import commands
 
@@ -460,12 +499,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         }
         return handlers[action](args, config, ui)
     except BottleNetError as exc:
-        ui.error(str(exc), hint=exc.hint)
+        ui.failure(exc)
+        if exc.detail:
+            log.debug("Details: %s", exc.detail)
         return EXIT_FAILURE
-    except KeyboardInterrupt:
-        ui.console.print()
-        ui.warning("Interrupted by user. Partially downloaded files are kept and resume on the next run.")
-        return EXIT_INTERRUPTED
 
 
 if __name__ == "__main__":  # pragma: no cover
