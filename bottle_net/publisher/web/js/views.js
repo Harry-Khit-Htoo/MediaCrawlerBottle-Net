@@ -18,6 +18,8 @@ export const NAV = [
 
 const CANCELLABLE = ["scheduled", "queued", "retrying", "missed", "uploading"];
 const RETRYABLE = ["failed", "cancelled", "missed"];
+// Bottle Net's website (docs/ on GitHub Pages); GitHub redirects it to the custom domain once one is set.
+const SITE_URL = "https://harry-khit-htoo.github.io/MediaCrawlerBottle-Net/";
 
 function safeLink(url, text) {
   return /^https:\/\//.test(url || "")
@@ -69,7 +71,14 @@ export function accountsView(accounts, { waiting = null } = {}) {
   return `<h1>Connected Accounts</h1>
     <p class="muted">You sign in on Google's and Facebook's own websites. Bottle Net never asks for or stores your password.</p>
     ${waiting ? `<p class="notice" role="status">Waiting for you to finish signing in to ${esc(PLATFORM_NAMES[waiting])} in the browser tab that opened…</p>` : ""}
-    <div class="grid two">${accounts.map(accountCard).join("")}</div>`;
+    <div class="grid two">${accounts.map(accountCard).join("")}</div>
+    <p class="muted" id="accounts-policies">Bottle Net uses YouTube API Services. By connecting YouTube you agree to the
+      ${safeLink("https://www.youtube.com/t/terms", "YouTube Terms of Service")}. See the
+      ${safeLink(`${SITE_URL}privacy.html`, "Bottle Net Privacy Policy")},
+      ${safeLink(`${SITE_URL}terms.html`, "Bottle Net Terms of Service")} and
+      ${safeLink("https://policies.google.com/privacy", "Google Privacy Policy")}.
+      You can remove access at any time with Disconnect or in your
+      ${safeLink("https://myaccount.google.com/permissions", "Google security settings")}.</p>`;
 }
 
 // ----------------------------------------------------------------- dashboard

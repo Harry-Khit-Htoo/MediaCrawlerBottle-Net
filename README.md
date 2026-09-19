@@ -295,6 +295,12 @@ stop. Pages: **Dashboard**, **Videos**, **Scheduler** (calendar),
 - The GUI listens on `127.0.0.1` only and is opened with a private link;
   other programs or websites cannot use it.
 - Facebook publishing is for **Pages** you manage (not personal profiles).
+- Bottle Net uses YouTube API Services. By connecting YouTube you agree to
+  the [YouTube Terms of Service](https://www.youtube.com/t/terms). See the
+  [Privacy Policy](docs/privacy.html), the [Terms of Service](docs/terms.html)
+  and the [Google Privacy Policy](https://policies.google.com/privacy). You
+  can remove access at any time with **Disconnect** or at
+  <https://myaccount.google.com/permissions>.
 
 ### One-time setup: API credentials
 
@@ -686,6 +692,8 @@ bottle-net/
 │       ├── files.py         Link lists, failed-URL files, download lookup
 │       ├── logger.py        Logging and secret redaction
 │       └── urls.py          URL validation, normalisation, de-duplication
+├── docs/                    Website: homepage, Privacy Policy, Terms (GitHub Pages)
+├── verification/           Google OAuth verification checklist and texts
 ├── tests/                   pytest suite (no real network access)
 ├── config.example.toml
 ├── pyproject.toml

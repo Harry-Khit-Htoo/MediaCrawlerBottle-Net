@@ -111,6 +111,15 @@ test("accounts page says passwords are never requested", () => {
   assert.ok(V.accountsView(connected, { waiting: "youtube" }).includes("finish signing in to YouTube"));
 });
 
+test("accounts page links the YouTube Terms and privacy policies", () => {
+  const html = V.accountsView(connected);
+  for (const url of ["https://www.youtube.com/t/terms", "https://policies.google.com/privacy",
+    "https://myaccount.google.com/permissions", "privacy.html", "terms.html"]) {
+    assert.ok(html.includes(url), url);
+  }
+  assert.ok(html.includes('rel="noopener noreferrer"'));
+});
+
 // ------------------------------------------------------------- job statuses
 
 test("scheduled platform jobs can be cancelled", () => {

@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bottle Net Privacy Policy</title>
+  <meta name="description" content="How Bottle Net handles your data, including information received from Google and YouTube APIs.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <a class="brand" href="index.html">Bottle Net</a>
+    <nav>
+      <a href="privacy.html">Privacy Policy</a>
+      <a href="terms.html">Terms of Service</a>
+    </nav>
+  </header>
+
+  <main>
+    <h1>Privacy Policy</h1>
+    <p class="muted">Effective date: 20 September 2026 &middot; Last updated: 20 September 2026</p>
+
+    <p>This policy explains what data Bottle Net ("the app", "we") accesses, how it is used, stored and shared, and how you can remove it. Bottle Net is a free, open-source desktop application for Windows, macOS and Linux, developed by Aung Khit Htoo.</p>
+
+    <div class="panel">
+      <strong>In short:</strong> Bottle Net runs only on your computer and has no server of its own. We do not collect, receive, sell or share your data. Everything the app accesses stays on your device and is sent only to Google/YouTube or Meta/Facebook to do what you asked.
+    </div>
+
+    <h2 id="google-data">1. Google and YouTube data</h2>
+    <p><strong>Bottle Net uses YouTube API Services.</strong> By connecting a YouTube account you also agree to the <a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a>. Google's handling of your data is described in the <a href="https://policies.google.com/privacy">Google Privacy Policy</a>.</p>
+
+    <h3>What we access and why</h3>
+    <p>You connect a Google account by clicking <em>Connect YouTube</em> and signing in on Google's own page. Bottle Net asks for these permissions:</p>
+    <div class="table-wrap">
+      <table>
+        <tr><th>Google permission (scope)</th><th>Data accessed</th><th>How it is used</th></tr>
+        <tr>
+          <td><code>youtube.upload</code></td>
+          <td>None is read. The permission is used only to send data to YouTube.</td>
+          <td>To upload the video files you choose to your channel, with the title, description, tags, privacy setting, "made for kids" setting and publish time you enter, and to set the thumbnail you choose.</td>
+        </tr>
+        <tr>
+          <td><code>youtube.readonly</code></td>
+          <td>Your channel's ID and title</td>
+          <td>Read once when you connect, to show which channel is connected and to check that the account has a YouTube channel before uploading. No other YouTube data (videos, playlists, comments, subscribers, analytics) is read.</td>
+        </tr>
+        <tr>
+          <td><code>openid</code>, <code>email</code></td>
+          <td>Your Google account email address</td>
+          <td>To show which Google account is connected on the Accounts page.</td>
+        </tr>
+      </table>
+    </div>
+
+    <h3>How it is stored</h3>
+    <ul>
+      <li><strong>Sign-in tokens</strong> (OAuth access and refresh tokens) are kept in your operating system's credential store: Windows Credential Manager, macOS Keychain or Linux Secret Service. If your system has no credential store, they are kept in a file in the app's data folder that only your user account can read. Tokens are never written to the app's database, its logs or the browser. The refresh token lets scheduled uploads run later without you signing in again.</li>
+      <li><strong>Account details</strong> (email address, channel title and channel ID) and your <strong>upload history</strong> (video titles, descriptions, schedules, YouTube video IDs and links, upload status and errors) are stored in a database in the app's data folder on your computer.</li>
+      <li>Your Google password is never requested, seen or stored. You sign in on Google's own page.</li>
+    </ul>
+
+    <h3>How it is shared</h3>
+    <p>Data received from Google APIs is sent only to Google, and only to perform the actions you request in the app. It is not sent to us or to any third party, internal or external. It is not sold, not used for advertising, profiling or credit decisions, and not used to develop, improve or train artificial-intelligence or machine-learning models. No human reads it.</p>
+    <p><strong>Bottle Net's use and transfer to any other app of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</strong></p>
+
+    <h2 id="facebook-data">2. Facebook data (optional)</h2>
+    <p>If you connect Facebook, you sign in on Meta's own page and grant Page permissions (<code>pages_show_list</code>, <code>pages_read_engagement</code>, <code>pages_manage_posts</code>, <code>publish_video</code>). Bottle Net receives access tokens and the names and IDs of the Facebook Pages you manage, so you can choose a Page and publish videos to it. Tokens are stored in your operating system's credential store in the same way as Google tokens. Page names and your upload history are stored in the local database. This data is sent only to Meta, to publish what you request.</p>
+    <p>When you use the <code>--browser</code> option to open Facebook content that requires a login, Bottle Net reads that browser's facebook.com cookies on your computer and sends them only to facebook.com. They are never saved, logged or sent anywhere else. Your Facebook password is never requested or read.</p>
+
+    <h2 id="files">3. Videos and other files</h2>
+    <p>Videos you download or add, thumbnails and log files are stored on your computer, in folders you choose or in the app's data folder. Log files record technical errors with tokens, passwords and other secrets removed. Files are uploaded only to the platforms you choose, when you choose.</p>
+
+    <h2 id="cookies">4. Cookies, analytics, advertising and third parties</h2>
+    <ul>
+      <li>Bottle Net contains no analytics, advertising, crash reporting or tracking.</li>
+      <li>Bottle Net does not allow any third party to serve content or advertisements, to collect information directly from you, or to place or recognize cookies or similar technologies on your browser or device.</li>
+      <li>The app's own control page runs on your computer at <code>127.0.0.1</code>. It sets one session cookie, which only keeps other programs on your computer from using the page. It is not a tracking cookie and is never sent to the internet.</li>
+      <li>This website uses no cookies and no analytics.</li>
+    </ul>
+
+    <h2 id="security">5. Security</h2>
+    <p>Sign-in uses Google's and Meta's OAuth 2.0 flows with PKCE, and tokens are only exchanged with Google or Meta over HTTPS. The app's control page accepts connections only from your own computer and requires a private access key. Tokens and secrets are removed from logs and never shown in the app.</p>
+
+    <h2 id="delete">6. Keeping, removing and revoking your data</h2>
+    <ul>
+      <li><strong>Disconnect:</strong> On the <em>Accounts</em> page, click <em>Disconnect</em>. Bottle Net asks Google (or Meta) to revoke its access, deletes the tokens from your computer and deletes the saved account details (email, channel or Page name and ID).</li>
+      <li><strong>Revoke from Google:</strong> You can remove Bottle Net's access at any time in your Google security settings at <a href="https://myaccount.google.com/permissions">https://myaccount.google.com/permissions</a>. Bottle Net can then no longer use the connection. Click <em>Disconnect</em> in the app to also delete the saved account details from your computer.</li>
+      <li><strong>Revoke from Facebook:</strong> Remove Bottle Net under <em>Settings &amp; privacy → Settings → Business integrations</em> on Facebook.</li>
+      <li><strong>Delete everything:</strong> Delete the app's data folder: <code>%LOCALAPPDATA%\bottle-net</code> on Windows, <code>~/Library/Application Support/bottle-net</code> on macOS or <code>~/.local/share/bottle-net</code> on Linux. This removes the database, logs, imported videos and thumbnails. Disconnect your accounts first so the tokens are removed from the credential store too.</li>
+      <li>Data is kept on your computer until you delete it. We hold no copy, so there is nothing for us to delete, and no data deletion request is needed. Videos already published to YouTube or Facebook stay there until you remove them on those platforms.</li>
+    </ul>
+
+    <h2 id="children">7. Children</h2>
+    <p>Bottle Net is not directed at children under 13 (or the minimum age required in your country) and does not knowingly process their data.</p>
+
+    <h2 id="changes">8. Changes to this policy</h2>
+    <p>If this policy changes, the new version will be posted on this page with a new "Last updated" date. If a change affects how Google user data is used, the app will ask for your consent again before using the data in the new way.</p>
+
+    <h2 id="contact">9. Contact</h2>
+    <p>Developer: Aung Khit Htoo<br>
+      Email: <a href="mailto:REPLACE_WITH_SUPPORT_EMAIL">REPLACE_WITH_SUPPORT_EMAIL</a></p>
+  </main>
+
+  <footer>
+    Bottle Net by Aung Khit Htoo &middot; <a href="index.html">Home</a> &middot; <a href="terms.html">Terms of Service</a>
+  </footer>
+</body>
+</html>
